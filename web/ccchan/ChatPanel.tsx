@@ -20,11 +20,16 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   const outputRef = useRef<HTMLDivElement>(null);
   const startingRef = useRef(false);
   const activeRole = settings.roles.find((role) => role.id === settings.activeRoleId) ?? settings.roles[0];
-  const roleSessionKey = activeRole ? `${activeRole.id}:${activeRole.aiEngine}:${activeRole.systemPrompt}` : "default";
+  const roleSessionKey = activeRole
+    ? `${activeRole.id}:${activeRole.aiEngine}:${activeRole.systemPrompt}:${activeRole.runtimeKind}:${activeRole.wslRemotePath ?? ""}:${activeRole.wslDistro ?? ""}`
+    : "default";
   const previousRoleSessionKeyRef = useRef(roleSessionKey);
   const aiEngine = activeRole?.aiEngine ?? settings.aiEngine;
   const roleName = activeRole?.name ?? "默认助手";
   const systemPrompt = activeRole?.systemPrompt;
+  const runtimeKind = activeRole?.runtimeKind ?? "local";
+  const wslRemotePath = activeRole?.wslRemotePath ?? null;
+  const wslDistro = activeRole?.wslDistro ?? null;
 
   useEffect(() => {
     if (previousRoleSessionKeyRef.current === roleSessionKey) return;
@@ -44,7 +49,13 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
       setStarting(true);
       setError(null);
       try {
-        const nextSessionId = await invoke<string>("start_ccchan_chat", { aiEngine, systemPrompt });
+        const nextSessionId = await invoke<string>("start_ccchan_chat", {
+          aiEngine,
+          systemPrompt,
+          runtimeKind,
+          wslRemotePath,
+          wslDistro,
+        });
         if (!cancelled) onSessionIdChange(nextSessionId);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -58,7 +69,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
     return () => {
       cancelled = true;
     };
-  }, [aiEngine, onSessionIdChange, sessionId, systemPrompt]);
+  }, [aiEngine, onSessionIdChange, runtimeKind, sessionId, systemPrompt, wslDistro, wslRemotePath]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -125,7 +136,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
       <header className="flex h-10 items-center justify-between px-3" style={{ borderBottom: "1px solid var(--app-border)" }}>
         <div className="flex min-w-0 items-center gap-2">
           <Maximize2 size={14} style={{ color: "var(--app-accent)" }} />
-          <span className="truncate text-[13px] font-medium">cc酱 · {roleName} · {aiEngine}</span>
+          <span className="truncate text-[13px] font-medium">cc酱 · {roleName} · {aiEngine} · {runtimeKind}</span>
         </div>
         <div className="flex items-center gap-1">
           <button

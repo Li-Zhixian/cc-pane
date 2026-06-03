@@ -49,11 +49,21 @@ describe("useCCChanStore", () => {
       windowVisible: true,
       windowX: 12,
       windowY: 34,
+      customPetDirs: [
+        " /home/dev/.codex/pets ",
+        "",
+        "/home/dev/.codex/pets",
+        "\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\.codex\\pets",
+      ],
     });
 
     expect(settings.activeRoleId).toBe("default");
     expect(settings.scopeMode).toBe("global");
     expect(settings.petSources).toEqual({ builtin: true, user: true, codexHome: true });
+    expect(settings.customPetDirs).toEqual([
+      "/home/dev/.codex/pets",
+      "\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\.codex\\pets",
+    ]);
     expect(settings.roles).toEqual([
       expect.objectContaining({
         id: "default",
@@ -72,6 +82,9 @@ describe("useCCChanStore", () => {
       aiEngine: "codex",
       petId: "doro.codex-pet",
       systemPrompt: "Review the current work.",
+      runtimeKind: "wsl",
+      wslRemotePath: "/home/dev/repo",
+      wslDistro: "Ubuntu",
     };
     useCCChanStore.setState({
       settings: normalizeCCChanSettings({
@@ -87,6 +100,7 @@ describe("useCCChanStore", () => {
     expect(settings.activeRoleId).toBe("reviewer");
     expect(settings.defaultPetId).toBe("doro.codex-pet");
     expect(settings.aiEngine).toBe("codex");
+    expect(settings.roles.find((role) => role.id === "reviewer")?.runtimeKind).toBe("wsl");
   });
 
   it("loads settings and pets through Tauri commands", async () => {

@@ -65,6 +65,9 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       aiEngine: value.aiEngine,
       petId: value.defaultPetId,
       systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+      runtimeKind: "local",
+      wslRemotePath: null,
+      wslDistro: null,
     };
     onChange(normalizeCCChanSettings({
       ...value,
@@ -254,6 +257,58 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
             </div>
           </div>
 
+          <div className="flex flex-col gap-2">
+            <Label>chat 运行环境</Label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "local", label: "本机" },
+                { value: "wsl", label: "WSL" },
+              ].map((option) => {
+                const active = activeRole.runtimeKind === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cn(
+                      "h-9 rounded-md border px-3 text-[13px] font-medium transition-colors",
+                      active
+                        ? "border-blue-500 bg-blue-600 text-white"
+                        : "border-[var(--app-border)] bg-[var(--app-content)] text-[var(--app-text-secondary)] hover:text-[var(--app-text-primary)]",
+                    )}
+                    onClick={() => updateRole(activeRole.id, { runtimeKind: option.value as CCChanRolePreset["runtimeKind"] })}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {activeRole.runtimeKind === "wsl" && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <Label>WSL 远端路径</Label>
+                <input
+                  value={activeRole.wslRemotePath ?? ""}
+                  placeholder="/mnt/d/my-project/cc-pane"
+                  className="h-9 rounded-md px-2 text-[13px] outline-none"
+                  style={selectStyle}
+                  onChange={(event) => updateRole(activeRole.id, { wslRemotePath: event.target.value || null })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label>WSL 发行版</Label>
+                <input
+                  value={activeRole.wslDistro ?? ""}
+                  placeholder="Ubuntu-24.04，可留空使用默认"
+                  className="h-9 rounded-md px-2 text-[13px] outline-none"
+                  style={selectStyle}
+                  onChange={(event) => updateRole(activeRole.id, { wslDistro: event.target.value || null })}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-1">
             <Label>系统提示词</Label>
             <textarea
@@ -352,6 +407,19 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           >
             删除当前用户宠物
           </Button>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label>额外宠物目录</Label>
+          <textarea
+            value={value.customPetDirs.join("\n")}
+            placeholder={"每行一个目录，例如：\n/mnt/d/my-pets\n\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\.codex\\pets"}
+            className="min-h-[78px] resize-y rounded-md px-2 py-2 font-mono text-[12px] outline-none"
+            style={selectStyle}
+            onChange={(event) => update("customPetDirs", event.target.value.split(/\r?\n/))}
+          />
+          <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
+            用于手动接入 Codex Home、WSL UNC 或其他本地宠物目录；这些目录只读，不会被“删除用户宠物”影响。
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {PET_RESOURCE_LINKS.map((link) => (

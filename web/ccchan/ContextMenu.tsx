@@ -1,4 +1,5 @@
 import { Bot, LogOut, Settings, Shuffle, EyeOff } from "lucide-react";
+import type { CCChanRolePreset } from "./types";
 
 export interface CCChanContextMenuPosition {
   x: number;
@@ -9,6 +10,9 @@ interface ContextMenuProps {
   position: CCChanContextMenuPosition;
   onHide: () => void;
   onSwitchPet: () => void;
+  roles: CCChanRolePreset[];
+  activeRoleId: string;
+  onSwitchRole: (roleId: string) => void;
   onOpenSettings: () => void;
   onExit: () => void;
   onClose: () => void;
@@ -18,6 +22,9 @@ export function ContextMenu({
   position,
   onHide,
   onSwitchPet,
+  roles,
+  activeRoleId,
+  onSwitchRole,
   onOpenSettings,
   onExit,
   onClose,
@@ -56,6 +63,32 @@ export function ContextMenu({
           <span>cc酱</span>
         </div>
         <div className="h-px" style={{ background: "var(--app-border)" }} />
+        {roles.length > 1 && (
+          <>
+            <div className="px-3 pb-1 pt-2 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
+              快速切角色
+            </div>
+            {roles.map((role) => {
+              const active = role.id === activeRoleId;
+              return (
+                <button
+                  key={role.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--app-hover)]"
+                  style={{ color: active ? "var(--app-accent)" : "var(--app-text-primary)" }}
+                  onClick={() => {
+                    onSwitchRole(role.id);
+                    onClose();
+                  }}
+                >
+                  <span className="truncate">{role.name}</span>
+                  <span className="shrink-0 text-[10px]" style={{ color: "var(--app-text-tertiary)" }}>{role.aiEngine}</span>
+                </button>
+              );
+            })}
+            <div className="h-px" style={{ background: "var(--app-border)" }} />
+          </>
+        )}
         {items.map((item) => {
           const Icon = item.icon;
           return (

@@ -3,7 +3,7 @@
 //! Sprite attribution: Homie spritesheet from oc-claw (MIT), Copyright (c) rainnoon.
 
 use crate::models::settings::CCChanSettings;
-use crate::models::{CliTool, LaunchProviderSelection};
+use crate::models::{CliTool, LaunchProviderSelection, WslLaunchInfo};
 use crate::services::{SettingsService, TerminalService};
 use crate::utils::{AppError, AppPaths, AppResult};
 use cc_panes_core::events::SessionNotifier;
@@ -42,6 +42,7 @@ pub struct PetMeta {
 pub enum PetSource {
     Builtin,
     User,
+    Custom,
     CodexHome,
 }
 
@@ -180,6 +181,16 @@ impl CCChanService {
                 "ccchan pet URL installs require an https:// URL",
             ));
         }
+        let path_ext = Path::new(parsed.path())
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if path_ext != "zip" {
+            return Err(AppError::from(
+                "ccchan URL installs currently require a .zip pet package",
+            ));
+        }
 
         let response = reqwest::get(parsed.clone())
             .await
@@ -204,16 +215,6 @@ impl CCChanService {
         let staging_id = uuid::Uuid::new_v4().to_string();
         let staging_dir = self.pet_staging_dir().join(&staging_id);
         std::fs::create_dir_all(&staging_dir)?;
-        let path_ext = Path::new(parsed.path())
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if path_ext != "zip" {
-            return Err(AppError::from(
-                "ccchan URL installs currently require a .zip pet package",
-            ));
-        }
         extract_pet_zip(&bytes, &staging_dir)?;
 
         let pet_root = find_pet_root(&staging_dir)?;
@@ -271,7 +272,15 @@ impl CCChanService {
             .pet_staging_dir()
             .join(sanitize_path_segment(&staging_id));
         let pet_root = find_pet_root(&staging_dir)?;
-        self.install_pet_dir(&pet_root)
+        let pet = self.install_pet_dir(&pet_root)?;
+        if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
+            warn!(
+                path = %staging_dir.display(),
+                error = %error,
+                "failed to remove ccchan pet staging directory after install"
+            );
+        }
+        Ok(pet)
     }
 
     pub fn install_pet_from_path(&self, path: String) -> AppResult<PetMeta> {
@@ -337,6 +346,9 @@ impl CCChanService {
         terminal_service: Arc<TerminalService>,
         ai_engine: String,
         system_prompt: Option<String>,
+        runtime_kind: Option<String>,
+        wsl_remote_path: Option<String>,
+        wsl_distro: Option<String>,
     ) -> AppResult<String> {
         let cli_tool = parse_ai_engine(&ai_engine)?;
         let chat_dir = self.app_paths.data_dir().join("ccchan");
@@ -353,6 +365,12 @@ impl CCChanService {
         }
 
         let chat_dir_str = chat_dir.to_string_lossy().to_string();
+        let runtime_kind = runtime_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("local");
+        let wsl_launch = build_ccchan_wsl_launch(runtime_kind, wsl_remote_path, wsl_distro)?;
         let prompt = build_ccchan_prompt(system_prompt.as_deref());
         let session_id = terminal_service.create_session(
             None,
@@ -372,7 +390,7 @@ impl CCChanService {
             None,
             None,
             None,
-            None,
+            wsl_launch.as_ref(),
         )?;
 
         let mut stored = self
@@ -432,17 +450,34 @@ impl CCChanService {
             }
         }
 
+        if settings.pet_sources.user {
+            for pet in self.load_pet_dir_children(&self.user_pets_dir(), PetSource::User)? {
+                pets.insert(pet.id.clone(), pet);
+            }
+        }
+
+        for dir in &settings.custom_pet_dirs {
+            match self.load_pet_dir_children(Path::new(dir), PetSource::Custom) {
+                Ok(custom_pets) => {
+                    for pet in custom_pets {
+                        pets.entry(pet.id.clone()).or_insert(pet);
+                    }
+                }
+                Err(error) => {
+                    warn!(
+                        path = %dir,
+                        error = %error,
+                        "skipping unreadable ccchan custom pet directory"
+                    );
+                }
+            }
+        }
+
         if settings.pet_sources.codex_home {
             if let Some(codex_pets_dir) = codex_home_pets_dir() {
                 for pet in self.load_pet_dir_children(&codex_pets_dir, PetSource::CodexHome)? {
                     pets.entry(pet.id.clone()).or_insert(pet);
                 }
-            }
-        }
-
-        if settings.pet_sources.user {
-            for pet in self.load_pet_dir_children(&self.user_pets_dir(), PetSource::User)? {
-                pets.insert(pet.id.clone(), pet);
             }
         }
 
@@ -485,7 +520,23 @@ impl CCChanService {
     fn install_pet_dir(&self, pet_root: &Path) -> AppResult<PetMeta> {
         let pet = load_pet_from_dir(pet_root, PetSource::User)?;
         let pet_dir_name = sanitized_pet_dir_name(&pet.id)?;
-        let target = self.user_pets_dir().join(pet_dir_name);
+        let pets_dir = self.user_pets_dir();
+        std::fs::create_dir_all(&pets_dir)?;
+        let target = pets_dir.join(&pet_dir_name);
+        let temp_target = pets_dir.join(format!(".{}-{}", pet_dir_name, uuid::Uuid::new_v4()));
+        if temp_target.exists() {
+            std::fs::remove_dir_all(&temp_target).map_err(|error| {
+                AppError::from(format!(
+                    "Failed to clear pet install temp {}: {}",
+                    temp_target.display(),
+                    error
+                ))
+            })?;
+        }
+        if let Err(error) = copy_pet_dir(pet_root, &temp_target) {
+            let _ = std::fs::remove_dir_all(&temp_target);
+            return Err(error);
+        }
         if target.exists() {
             std::fs::remove_dir_all(&target).map_err(|error| {
                 AppError::from(format!(
@@ -495,7 +546,14 @@ impl CCChanService {
                 ))
             })?;
         }
-        copy_pet_dir(pet_root, &target)?;
+        std::fs::rename(&temp_target, &target).map_err(|error| {
+            AppError::from(format!(
+                "Failed to move installed pet {} to {}: {}",
+                temp_target.display(),
+                target.display(),
+                error
+            ))
+        })?;
         load_pet_from_dir(&target, PetSource::User)
     }
 
@@ -704,6 +762,36 @@ fn build_ccchan_prompt(system_prompt: Option<&str>) -> String {
     format!("{CCCHAN_HELPER_PROMPT}\n\n# Active ccchan Role\n\n{system_prompt}\n")
 }
 
+fn build_ccchan_wsl_launch(
+    runtime_kind: &str,
+    wsl_remote_path: Option<String>,
+    wsl_distro: Option<String>,
+) -> AppResult<Option<WslLaunchInfo>> {
+    match runtime_kind {
+        "local" => Ok(None),
+        "wsl" => {
+            let remote_path = wsl_remote_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| AppError::from("ccchan WSL chat requires a WSL remote path"))?;
+            Ok(Some(WslLaunchInfo {
+                remote_path: remote_path.to_string(),
+                workspace_remote_path: None,
+                distro: wsl_distro
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+            }))
+        }
+        other => Err(AppError::from(format!(
+            "Unsupported ccchan runtimeKind '{}'; expected 'local' or 'wsl'",
+            other
+        ))),
+    }
+}
+
 fn load_manifest_pets(root: &Path, source: PetSource) -> AppResult<Vec<PetMeta>> {
     let manifest_path = root.join("pets-manifest.json");
     let manifest_content = std::fs::read_to_string(&manifest_path).map_err(|error| {
@@ -862,7 +950,8 @@ fn source_rank(source: PetSource) -> u8 {
     match source {
         PetSource::User => 0,
         PetSource::Builtin => 1,
-        PetSource::CodexHome => 2,
+        PetSource::Custom => 2,
+        PetSource::CodexHome => 3,
     }
 }
 
@@ -964,6 +1053,17 @@ fn safe_relative_pet_path(value: &str) -> AppResult<PathBuf> {
 }
 
 fn copy_pet_dir(source: &Path, target: &Path) -> AppResult<()> {
+    let mut limits = PetCopyLimits::default();
+    copy_pet_dir_limited(source, target, &mut limits)
+}
+
+#[derive(Default)]
+struct PetCopyLimits {
+    files: usize,
+    bytes: usize,
+}
+
+fn copy_pet_dir_limited(source: &Path, target: &Path, limits: &mut PetCopyLimits) -> AppResult<()> {
     std::fs::create_dir_all(target)?;
     for entry in std::fs::read_dir(source).map_err(|error| {
         AppError::from(format!(
@@ -973,11 +1073,30 @@ fn copy_pet_dir(source: &Path, target: &Path) -> AppResult<()> {
         ))
     })? {
         let entry = entry?;
+        let file_type = entry.file_type()?;
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
-        if source_path.is_dir() {
-            copy_pet_dir(&source_path, &target_path)?;
-        } else {
+        if file_type.is_symlink() {
+            return Err(AppError::from(format!(
+                "ccchan pet folders cannot contain symlinks: {}",
+                source_path.display()
+            )));
+        }
+        if file_type.is_dir() {
+            copy_pet_dir_limited(&source_path, &target_path, limits)?;
+        } else if file_type.is_file() {
+            limits.files = limits.files.saturating_add(1);
+            if limits.files > MAX_PET_FILES {
+                return Err(AppError::from(format!(
+                    "Pet folder contains too many files: {}",
+                    limits.files
+                )));
+            }
+            let size = entry.metadata()?.len() as usize;
+            limits.bytes = limits.bytes.saturating_add(size);
+            if limits.bytes > MAX_PET_PACKAGE_BYTES {
+                return Err(AppError::from("Pet folder total size is too large"));
+            }
             std::fs::copy(&source_path, &target_path).map_err(|error| {
                 AppError::from(format!(
                     "Failed to copy pet file {}: {}",
@@ -985,6 +1104,11 @@ fn copy_pet_dir(source: &Path, target: &Path) -> AppResult<()> {
                     error
                 ))
             })?;
+        } else {
+            return Err(AppError::from(format!(
+                "ccchan pet folders can only contain files and directories: {}",
+                source_path.display()
+            )));
         }
     }
     Ok(())
@@ -1157,6 +1281,37 @@ mod tests {
     }
 
     #[test]
+    fn copy_pet_dir_rejects_too_many_files() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        std::fs::create_dir_all(&source).expect("create source");
+        for index in 0..=MAX_PET_FILES {
+            std::fs::write(source.join(format!("{index}.txt")), b"x").expect("write file");
+        }
+
+        let error = copy_pet_dir(&source, &target).expect_err("too many files rejected");
+
+        assert!(error.to_string().contains("too many files"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_pet_dir_rejects_symlinks() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        std::fs::create_dir_all(&source).expect("create source");
+        std::fs::write(source.join("sprite.webp"), b"x").expect("write file");
+        std::os::unix::fs::symlink(source.join("sprite.webp"), source.join("linked.webp"))
+            .expect("create symlink");
+
+        let error = copy_pet_dir(&source, &target).expect_err("symlink rejected");
+
+        assert!(error.to_string().contains("symlinks"));
+    }
+
+    #[test]
     fn sanitize_path_segment_blocks_path_separators() {
         assert_eq!(sanitize_path_segment("../sample"), "sample");
         assert_eq!(sanitize_path_segment("sample/pet"), "sample-pet");
@@ -1211,5 +1366,26 @@ mod tests {
 
         assert_eq!(pet.id, "folder-id");
         assert_eq!(pet.display_name, "folder-id");
+    }
+
+    #[test]
+    fn build_ccchan_wsl_launch_requires_remote_path() {
+        let error = build_ccchan_wsl_launch("wsl", None, None).expect_err("remote path required");
+
+        assert!(error.to_string().contains("WSL remote path"));
+    }
+
+    #[test]
+    fn build_ccchan_wsl_launch_trims_values() {
+        let launch = build_ccchan_wsl_launch(
+            "wsl",
+            Some(" /home/dev/repo ".to_string()),
+            Some(" Ubuntu ".to_string()),
+        )
+        .expect("build wsl")
+        .expect("wsl launch");
+
+        assert_eq!(launch.remote_path, "/home/dev/repo");
+        assert_eq!(launch.distro.as_deref(), Some("Ubuntu"));
     }
 }

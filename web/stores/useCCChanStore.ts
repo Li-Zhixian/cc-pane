@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import type { CCChanAiEngine, CCChanPetSources, CCChanRolePreset, CCChanScopeMode, CCChanSettings, PetMeta } from "@/ccchan/types";
+import type {
+  CCChanAiEngine,
+  CCChanPetSources,
+  CCChanRolePreset,
+  CCChanRoleRuntimeKind,
+  CCChanScopeMode,
+  CCChanSettings,
+  PetMeta,
+} from "@/ccchan/types";
 
 const fallbackSprite = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -28,6 +36,9 @@ function defaultRole(aiEngine: CCChanAiEngine, petId: string): CCChanRolePreset 
     aiEngine,
     petId,
     systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+    runtimeKind: "local",
+    wslRemotePath: null,
+    wslDistro: null,
   };
 }
 
@@ -38,6 +49,7 @@ export const DEFAULT_CCCHAN_SETTINGS: CCChanSettings = {
   roles: [defaultRole("claude", "doro.codex-pet")],
   scopeMode: "global",
   petSources: DEFAULT_PET_SOURCES,
+  customPetDirs: [],
   autoStart: true,
   soundEnabled: true,
   windowVisible: true,
@@ -87,6 +99,14 @@ function isScopeMode(value: unknown): value is CCChanScopeMode {
   return value === "global" || value === "focusedWindow";
 }
 
+function isRoleRuntimeKind(value: unknown): value is CCChanRoleRuntimeKind {
+  return value === "local" || value === "wsl";
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 function normalizeRole(role: Partial<CCChanRolePreset>, fallback: CCChanRolePreset): CCChanRolePreset {
   const id = typeof role.id === "string" && role.id.trim().length > 0 ? role.id.trim() : fallback.id;
   const name = typeof role.name === "string" && role.name.trim().length > 0 ? role.name.trim() : fallback.name;
@@ -102,6 +122,9 @@ function normalizeRole(role: Partial<CCChanRolePreset>, fallback: CCChanRolePres
     aiEngine: isAiEngine(role.aiEngine) ? role.aiEngine : fallback.aiEngine,
     petId,
     systemPrompt,
+    runtimeKind: isRoleRuntimeKind(role.runtimeKind) ? role.runtimeKind : fallback.runtimeKind,
+    wslRemotePath: normalizeOptionalString(role.wslRemotePath),
+    wslDistro: normalizeOptionalString(role.wslDistro),
   };
 }
 
@@ -111,6 +134,18 @@ function normalizePetSources(sources: Partial<CCChanPetSources> | null | undefin
     user: sources?.user ?? DEFAULT_PET_SOURCES.user,
     codexHome: sources?.codexHome ?? DEFAULT_PET_SOURCES.codexHome,
   };
+}
+
+function normalizeCustomPetDirs(dirs: unknown): string[] {
+  if (!Array.isArray(dirs)) return [];
+  const normalized: string[] = [];
+  for (const dir of dirs) {
+    if (typeof dir !== "string") continue;
+    const trimmed = dir.trim();
+    if (!trimmed || normalized.includes(trimmed)) continue;
+    normalized.push(trimmed);
+  }
+  return normalized;
 }
 
 export function normalizeCCChanSettings(settings: Partial<CCChanSettings> | null | undefined): CCChanSettings {
@@ -143,6 +178,7 @@ export function normalizeCCChanSettings(settings: Partial<CCChanSettings> | null
     roles,
     scopeMode: isScopeMode(settings?.scopeMode) ? settings.scopeMode : DEFAULT_CCCHAN_SETTINGS.scopeMode,
     petSources: normalizePetSources(settings?.petSources),
+    customPetDirs: normalizeCustomPetDirs(settings?.customPetDirs),
     windowX: settings?.windowX ?? null,
     windowY: settings?.windowY ?? null,
   };

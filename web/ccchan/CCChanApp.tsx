@@ -6,6 +6,7 @@ import { Toaster, toast } from "sonner";
 import { useCCChanStore } from "@/stores/useCCChanStore";
 import { useTerminalStatusStore } from "@/stores";
 import type { TerminalStatusInfo, TerminalStatusType } from "@/types";
+import { playNotificationSound } from "@/utils/notificationSound";
 import { aggregateStatus } from "./statusAggregator";
 import { ChatPanel } from "./ChatPanel";
 import { ContextMenu, type CCChanContextMenuPosition } from "./ContextMenu";
@@ -42,6 +43,7 @@ export function CCChanApp() {
   const setChatSessionId = useCCChanStore((state) => state.setChatSessionId);
   const setWindowVisible = useCCChanStore((state) => state.setWindowVisible);
   const setPosition = useCCChanStore((state) => state.setPosition);
+  const setActiveRoleId = useCCChanStore((state) => state.setActiveRoleId);
   const switchPet = useCCChanStore((state) => state.switchPet);
   const initTerminalStatus = useTerminalStatusStore((state) => state.init);
   const cleanupTerminalStatus = useTerminalStatusStore((state) => state.cleanup);
@@ -217,6 +219,11 @@ export function CCChanApp() {
       if (payload.kind === "task-complete") toast.success(title);
       if (payload.kind === "task-failed") toast.error(title);
       if (payload.kind === "task-waiting") toast.info(title);
+      if (settings.soundEnabled) {
+        playNotificationSound().catch((error) => {
+          console.warn("ccchan notification sound failed:", error);
+        });
+      }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         setEventState(null);
@@ -230,7 +237,7 @@ export function CCChanApp() {
       if (timer) clearTimeout(timer);
       unlisten?.();
     };
-  }, []);
+  }, [settings.soundEnabled]);
 
   useEffect(() => {
     function handleMouseUp() {
@@ -298,6 +305,14 @@ export function CCChanApp() {
   async function hideWindow() {
     await invoke("hide_ccchan");
     setWindowVisible(false);
+  }
+
+  function switchRole(roleId: string) {
+    setActiveRoleId(roleId);
+    const nextSettings = useCCChanStore.getState().settings;
+    useCCChanStore.getState().saveSettings(nextSettings).catch((error) => {
+      console.warn("ccchan role switch save failed:", error);
+    });
   }
 
   if (!selectedPet) return null;
@@ -374,6 +389,9 @@ export function CCChanApp() {
           position={menuPosition}
           onHide={() => void hideWindow().catch(() => {})}
           onSwitchPet={switchPet}
+          roles={settings.roles}
+          activeRoleId={settings.activeRoleId}
+          onSwitchRole={switchRole}
           onOpenSettings={() => void emitTo("main", "ccchan:open-settings")}
           onExit={() => {
             if (chatSessionId) void invoke("stop_ccchan_chat", { sessionId: chatSessionId }).catch(() => {});

@@ -2,6 +2,7 @@ import type { TerminalOutput } from "@/types";
 
 export type CCChanAiEngine = "claude" | "codex";
 export type CCChanScopeMode = "global" | "focusedWindow";
+export type CCChanRoleRuntimeKind = "local" | "wsl";
 
 export interface CCChanPetSources {
   builtin: boolean;
@@ -15,6 +16,9 @@ export interface CCChanRolePreset {
   aiEngine: CCChanAiEngine;
   petId: string;
   systemPrompt: string;
+  runtimeKind: CCChanRoleRuntimeKind;
+  wslRemotePath: string | null;
+  wslDistro: string | null;
 }
 
 export interface CCChanSettings {
@@ -24,6 +28,7 @@ export interface CCChanSettings {
   roles: CCChanRolePreset[];
   scopeMode: CCChanScopeMode;
   petSources: CCChanPetSources;
+  customPetDirs: string[];
   autoStart: boolean;
   soundEnabled: boolean;
   windowVisible: boolean;
@@ -36,7 +41,7 @@ export interface PetMeta {
   displayName: string;
   description: string;
   spritesheetUrl: string;
-  source: "builtin" | "user" | "codexHome";
+  source: "builtin" | "user" | "custom" | "codexHome";
   atlas: { cellW: number; cellH: number; cols: number; rows: number };
   animations: Record<string, { row: number; frames: number; fps: number; colOffset?: number }>;
 }

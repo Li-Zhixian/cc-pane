@@ -7,7 +7,7 @@ ccchan is the CC-Panes desktop mascot window. It follows terminal status events 
 The `ccchan` settings block keeps legacy fields for compatibility and adds role presets:
 
 - `activeRoleId`: selected role id.
-- `roles`: role presets with `name`, `aiEngine`, `petId`, and `systemPrompt`.
+- `roles`: role presets with `name`, `aiEngine`, `petId`, `systemPrompt`, and chat runtime fields.
 - `scopeMode`: `global` or `focusedWindow`. `global` follows all live terminal sessions; `focusedWindow` follows the active terminal session bridged from the main window into the ccchan WebView.
 - `petSources`: enables bundled pets, user-installed pets, and Codex Home pets.
 - `aiEngine` and `defaultPetId`: legacy mirrors of the active role, kept for older callers.
@@ -15,6 +15,10 @@ The `ccchan` settings block keeps legacy fields for compatibility and adds role 
 On load, missing role fields are migrated into a `default` role. Selecting a role synchronizes `aiEngine` and `defaultPetId` so existing code paths remain compatible.
 
 When ccchan chat is already open, changing the active role, AI engine, or role system prompt stops the old chat PTY and starts a new session with the updated role prompt. Renaming a role does not restart the session.
+
+The mascot context menu lists role presets when more than one role exists, so users can switch ccchan role, pet, and engine directly from the desktop pet without opening settings.
+
+Role chat runtime supports `local` and explicit `wsl`. WSL chat requires a role-level `wslRemotePath`; `wslDistro` is optional and falls back to the default distro. This is intentionally explicit so ccchan chat can run Claude Code or Codex from the same WSL project path the user expects, instead of silently guessing from the host data directory.
 
 ## Pet Package Format
 
@@ -54,8 +58,9 @@ Pets are discovered from:
 - Bundled resources: `src-tauri/resources/ccchan`.
 - User installs: `<data-dir>/ccchan/pets`.
 - Codex Home: `$CODEX_HOME/pets` or `~/.codex/pets`.
+- Custom read-only directories configured in settings, useful for Windows paths, WSL UNC paths, or manually mirrored Codex Home pet folders.
 
-Duplicate ids are resolved in this order: user installs, bundled pets, Codex Home.
+Duplicate ids are resolved in this order: user installs, bundled pets, custom directories, Codex Home.
 
 ## Installing Pets
 
@@ -67,7 +72,7 @@ The ccchan settings panel supports:
 - User pet management: lists and deletes pets installed under `<data-dir>/ccchan/pets`; bundled and Codex Home pets are read-only from this UI.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
-URL installs require `https://`, cap package size at 30 MB, cap file count at 128, and reject zip entries that escape the staging directory.
+URL installs require `https://`, cap package size at 30 MB, cap file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
 
 Official Codex app pets also support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app deep-link flow; it reads Codex Home pets and supports package import directly.
 
@@ -78,6 +83,7 @@ ccchan combines two status paths:
 - Hook/session notifier events from backend terminal lifecycle emit `task-complete`, `task-failed`, and `task-waiting`.
 - The ccchan window also subscribes to terminal status snapshots and live updates, giving a PTY fallback for Claude Code and Codex sessions.
 - `focusedWindow` mode uses a main-window bridge: ccchan emits `ccchan:ready`, the main window replies with `ccchan:active-session`, and subsequent pane/tab changes republish the active terminal session id.
+- `soundEnabled` controls the ccchan window's Web Audio cue for these lifecycle events; toast bubbles still appear when sound is disabled.
 
 Codex hooks are an enhancement path, not the only state source. Codex supports lifecycle hooks and `commandWindows`; CC-Panes enables the canonical `[features].hooks = true` flag while retaining the deprecated `codex_hooks` alias for compatibility. Project-local hook behavior still depends on Codex trust/config and host/runtime details, so CC-Panes treats terminal status snapshots and backend session notifications as the cross-platform baseline for Claude Code, Codex, Windows host launches, and WSL launches.
 

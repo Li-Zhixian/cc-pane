@@ -278,6 +278,8 @@ pub struct CCChanSettings {
     pub scope_mode: String,
     #[serde(default)]
     pub pet_sources: CCChanPetSources,
+    #[serde(default)]
+    pub custom_pet_dirs: Vec<String>,
     #[serde(default = "default_true")]
     pub auto_start: bool,
     #[serde(default = "default_true")]
@@ -298,6 +300,12 @@ pub struct CCChanRolePreset {
     pub ai_engine: String,
     pub pet_id: String,
     pub system_prompt: String,
+    #[serde(default = "default_ccchan_role_runtime_kind")]
+    pub runtime_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wsl_remote_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wsl_distro: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -341,6 +349,7 @@ impl CCChanSettings {
         if !matches!(self.scope_mode.as_str(), "global" | "focusedWindow") {
             self.scope_mode = default_ccchan_scope_mode();
         }
+        self.custom_pet_dirs = normalize_ccchan_custom_pet_dirs(&self.custom_pet_dirs);
     }
 }
 
@@ -360,6 +369,10 @@ fn default_ccchan_scope_mode() -> String {
     "global".to_string()
 }
 
+fn default_ccchan_role_runtime_kind() -> String {
+    "local".to_string()
+}
+
 fn default_ccchan_role_prompt() -> String {
     [
         "You are ccchan, the desktop mascot assistant inside CC-Panes.",
@@ -376,6 +389,9 @@ fn default_ccchan_role(ai_engine: &str, pet_id: &str) -> CCChanRolePreset {
         ai_engine: ai_engine.to_string(),
         pet_id: pet_id.to_string(),
         system_prompt: default_ccchan_role_prompt(),
+        runtime_kind: default_ccchan_role_runtime_kind(),
+        wsl_remote_path: None,
+        wsl_distro: None,
     }
 }
 
@@ -410,6 +426,19 @@ fn normalize_ccchan_roles(
             if next.system_prompt.trim().is_empty() {
                 next.system_prompt = fallback.system_prompt.clone();
             }
+            if !matches!(next.runtime_kind.as_str(), "local" | "wsl") {
+                next.runtime_kind = fallback.runtime_kind.clone();
+            }
+            next.wsl_remote_path = next
+                .wsl_remote_path
+                .as_ref()
+                .map(|path| path.trim().to_string())
+                .filter(|path| !path.is_empty());
+            next.wsl_distro = next
+                .wsl_distro
+                .as_ref()
+                .map(|distro| distro.trim().to_string())
+                .filter(|distro| !distro.is_empty());
             next
         })
         .collect();
@@ -421,6 +450,18 @@ fn normalize_ccchan_roles(
         .any(|role| role.id == default_ccchan_role_id())
     {
         normalized.insert(0, fallback);
+    }
+    normalized
+}
+
+fn normalize_ccchan_custom_pet_dirs(dirs: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for dir in dirs {
+        let trimmed = dir.trim();
+        if trimmed.is_empty() || normalized.iter().any(|item| item == trimmed) {
+            continue;
+        }
+        normalized.push(trimmed.to_string());
     }
     normalized
 }
@@ -572,6 +613,7 @@ impl Default for CCChanSettings {
             )],
             scope_mode: default_ccchan_scope_mode(),
             pet_sources: CCChanPetSources::default(),
+            custom_pet_dirs: Vec::new(),
             auto_start: true,
             sound_enabled: true,
             window_visible: true,
@@ -801,6 +843,7 @@ mod tests {
         assert_eq!(settings.roles[0].id, "default");
         assert_eq!(settings.roles[0].ai_engine, "codex");
         assert_eq!(settings.roles[0].pet_id, "doro.codex-pet");
+        assert_eq!(settings.roles[0].runtime_kind, "local");
         assert!(settings.roles[0].system_prompt.contains("CC-Panes"));
     }
 
@@ -816,6 +859,9 @@ mod tests {
                     ai_engine: "codex".to_string(),
                     pet_id: "doro.codex-pet".to_string(),
                     system_prompt: "Review the current work.".to_string(),
+                    runtime_kind: "wsl".to_string(),
+                    wsl_remote_path: Some(" /home/dev/repo ".to_string()),
+                    wsl_distro: Some(" Ubuntu ".to_string()),
                 },
             ],
             ..CCChanSettings::default()
@@ -826,5 +872,34 @@ mod tests {
         assert_eq!(settings.active_role_id, "reviewer");
         assert_eq!(settings.ai_engine, "codex");
         assert_eq!(settings.default_pet_id, "doro.codex-pet");
+        assert_eq!(settings.roles[1].runtime_kind, "wsl");
+        assert_eq!(
+            settings.roles[1].wsl_remote_path.as_deref(),
+            Some("/home/dev/repo")
+        );
+        assert_eq!(settings.roles[1].wsl_distro.as_deref(), Some("Ubuntu"));
+    }
+
+    #[test]
+    fn ccchan_merge_missing_defaults_normalizes_custom_pet_dirs() {
+        let mut settings = CCChanSettings {
+            custom_pet_dirs: vec![
+                " /home/dev/.codex/pets ".to_string(),
+                String::new(),
+                "/home/dev/.codex/pets".to_string(),
+                "\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\.codex\\pets".to_string(),
+            ],
+            ..CCChanSettings::default()
+        };
+
+        settings.merge_missing_defaults();
+
+        assert_eq!(
+            settings.custom_pet_dirs,
+            vec![
+                "/home/dev/.codex/pets".to_string(),
+                "\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\.codex\\pets".to_string(),
+            ]
+        );
     }
 }

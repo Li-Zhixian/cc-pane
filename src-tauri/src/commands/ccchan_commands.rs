@@ -76,6 +76,9 @@ pub async fn start_ccchan_chat(
     terminal_service: State<'_, Arc<TerminalService>>,
     ai_engine: String,
     system_prompt: Option<String>,
+    runtime_kind: Option<String>,
+    wsl_remote_path: Option<String>,
+    wsl_distro: Option<String>,
 ) -> AppResult<String> {
     debug!(ai_engine = %ai_engine, "cmd::start_ccchan_chat");
     let service = app
@@ -85,7 +88,14 @@ pub async fn start_ccchan_chat(
         .clone();
     let terminal_service = terminal_service.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        service.start_chat(terminal_service, ai_engine, system_prompt)
+        service.start_chat(
+            terminal_service,
+            ai_engine,
+            system_prompt,
+            runtime_kind,
+            wsl_remote_path,
+            wsl_distro,
+        )
     })
     .await
     .map_err(|error| AppError::from(error.to_string()))?;
