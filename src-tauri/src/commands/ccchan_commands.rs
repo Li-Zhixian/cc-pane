@@ -1,4 +1,4 @@
-use crate::ccchan_service::{clamp_position_to_visible, CCChanService, PetMeta};
+use crate::ccchan_service::{clamp_position_to_visible, CCChanService, PetInstallPreview, PetMeta};
 use crate::models::settings::CCChanSettings;
 use crate::services::TerminalService;
 use crate::utils::{AppError, AppResult};
@@ -75,6 +75,7 @@ pub async fn start_ccchan_chat(
     app: AppHandle,
     terminal_service: State<'_, Arc<TerminalService>>,
     ai_engine: String,
+    system_prompt: Option<String>,
 ) -> AppResult<String> {
     debug!(ai_engine = %ai_engine, "cmd::start_ccchan_chat");
     let service = app
@@ -84,7 +85,7 @@ pub async fn start_ccchan_chat(
         .clone();
     let terminal_service = terminal_service.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        service.start_chat(terminal_service, ai_engine)
+        service.start_chat(terminal_service, ai_engine, system_prompt)
     })
     .await
     .map_err(|error| AppError::from(error.to_string()))?;
@@ -136,6 +137,47 @@ pub fn get_ccchan_pets(app: AppHandle) -> AppResult<Vec<PetMeta>> {
         .try_state::<Arc<CCChanService>>()
         .ok_or_else(|| AppError::from("CCChanService is not registered"))?;
     service.get_pets(&app)
+}
+
+#[tauri::command]
+pub async fn preview_ccchan_pet_from_url(
+    app: AppHandle,
+    url: String,
+) -> AppResult<PetInstallPreview> {
+    debug!("cmd::preview_ccchan_pet_from_url");
+    let service = app
+        .try_state::<Arc<CCChanService>>()
+        .ok_or_else(|| AppError::from("CCChanService is not registered"))?
+        .inner()
+        .clone();
+    service.preview_pet_from_url(url).await
+}
+
+#[tauri::command]
+pub fn preview_ccchan_pet_from_path(
+    service: State<'_, Arc<CCChanService>>,
+    path: String,
+) -> AppResult<PetInstallPreview> {
+    debug!("cmd::preview_ccchan_pet_from_path");
+    service.preview_pet_from_path(path)
+}
+
+#[tauri::command]
+pub fn install_ccchan_pet_from_preview(
+    service: State<'_, Arc<CCChanService>>,
+    staging_id: String,
+) -> AppResult<PetMeta> {
+    debug!("cmd::install_ccchan_pet_from_preview");
+    service.install_pet_from_preview(staging_id)
+}
+
+#[tauri::command]
+pub fn install_ccchan_pet_from_path(
+    service: State<'_, Arc<CCChanService>>,
+    path: String,
+) -> AppResult<PetMeta> {
+    debug!("cmd::install_ccchan_pet_from_path");
+    service.install_pet_from_path(path)
 }
 
 #[tauri::command]

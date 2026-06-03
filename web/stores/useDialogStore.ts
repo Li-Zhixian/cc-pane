@@ -17,7 +17,8 @@ interface PendingLaunch {
 interface DialogState {
   // Settings
   settingsOpen: boolean;
-  openSettings: () => void;
+  settingsSection: string | null;
+  openSettings: (section?: string) => void;
   closeSettings: () => void;
 
   // Journal
@@ -77,7 +78,8 @@ interface DialogState {
 export const useDialogStore = create<DialogState>((set) => ({
   // Settings
   settingsOpen: false,
-  openSettings: () => set({ settingsOpen: true }),
+  settingsSection: null,
+  openSettings: (section) => set({ settingsOpen: true, settingsSection: section ?? null }),
   closeSettings: () => set({ settingsOpen: false }),
 
   // Journal

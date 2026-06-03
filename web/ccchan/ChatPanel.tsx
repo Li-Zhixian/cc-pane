@@ -19,6 +19,10 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   const [error, setError] = useState<string | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const startingRef = useRef(false);
+  const activeRole = settings.roles.find((role) => role.id === settings.activeRoleId) ?? settings.roles[0];
+  const aiEngine = activeRole?.aiEngine ?? settings.aiEngine;
+  const roleName = activeRole?.name ?? "默认助手";
+  const systemPrompt = activeRole?.systemPrompt;
 
   useEffect(() => {
     let cancelled = false;
@@ -29,7 +33,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
       setStarting(true);
       setError(null);
       try {
-        const nextSessionId = await invoke<string>("start_ccchan_chat", { aiEngine: settings.aiEngine });
+        const nextSessionId = await invoke<string>("start_ccchan_chat", { aiEngine, systemPrompt });
         if (!cancelled) onSessionIdChange(nextSessionId);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -43,7 +47,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
     return () => {
       cancelled = true;
     };
-  }, [onSessionIdChange, sessionId, settings.aiEngine]);
+  }, [aiEngine, onSessionIdChange, sessionId, systemPrompt]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -110,7 +114,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
       <header className="flex h-10 items-center justify-between px-3" style={{ borderBottom: "1px solid var(--app-border)" }}>
         <div className="flex min-w-0 items-center gap-2">
           <Maximize2 size={14} style={{ color: "var(--app-accent)" }} />
-          <span className="truncate text-[13px] font-medium">cc酱 · {settings.aiEngine}</span>
+          <span className="truncate text-[13px] font-medium">cc酱 · {roleName} · {aiEngine}</span>
         </div>
         <div className="flex items-center gap-1">
           <button

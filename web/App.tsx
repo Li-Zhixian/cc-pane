@@ -53,7 +53,7 @@ import { historyService, terminalService, localHistoryService, checkUpdateSilent
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { isTauriReady, waitForTauri } from "@/utils";
 import { playNotificationSound } from "@/utils/notificationSound";
 import { findPaneFocusTarget, readPaneFocusRects, type PaneFocusDirection } from "@/utils/paneFocus";
@@ -89,6 +89,31 @@ function resolveRuntimeKind(opts: Pick<OpenTerminalOptions, "ssh" | "wsl">): str
   if (opts.ssh) return "ssh";
   if (opts.wsl) return "wsl";
   return "local";
+}
+
+function focusSessionTab(sessionId: string): boolean {
+  const panes = usePanesStore.getState();
+  for (const pane of panes.allPanels()) {
+    const tabIndex = pane.tabs.findIndex((tab) => tab.sessionId === sessionId);
+    if (tabIndex >= 0) {
+      panes.setActivePane(pane.id);
+      panes.switchToTab(pane.id, tabIndex);
+      return true;
+    }
+  }
+  return false;
+}
+
+function getActiveTerminalSessionId(): string | null {
+  const panes = usePanesStore.getState();
+  const activePane = panes.activePane();
+  if (!activePane) return null;
+  const activeTab = activePane.tabs.find((tab) => tab.id === activePane.activeTabId);
+  if (!activeTab || activeTab.contentType !== "terminal") return null;
+  const activeLeaf = activeTab.terminalRootPane && activeTab.activeTerminalPaneId
+    ? findTerminalLeaf(activeTab.terminalRootPane, activeTab.activeTerminalPaneId)
+    : null;
+  return activeLeaf?.sessionId ?? activeTab.sessionId ?? null;
 }
 
 export default function App() {
@@ -193,6 +218,57 @@ function MainApp() {
   // 注册全局 API（Skill 用）
   useEffect(() => {
     registerGlobalApi();
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriReady()) return;
+    let cancelled = false;
+    let unlistenFocus: (() => void) | null = null;
+    let unlistenSettings: (() => void) | null = null;
+
+    listen<{ sessionId?: string }>("ccchan:focus-session", (event) => {
+      if (cancelled) return;
+      const sessionId = event.payload?.sessionId;
+      if (!sessionId) return;
+      if (!focusSessionTab(sessionId)) {
+        toast.info("未找到对应会话标签");
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenFocus = fn;
+    }).catch((error) => {
+      console.warn("ccchan focus listener failed:", error);
+    });
+
+    listen("ccchan:open-settings", () => {
+      if (!cancelled) useDialogStore.getState().openSettings("ccchan");
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenSettings = fn;
+    }).catch((error) => {
+      console.warn("ccchan settings listener failed:", error);
+    });
+
+    return () => {
+      cancelled = true;
+      unlistenFocus?.();
+      unlistenSettings?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriReady()) return;
+    let lastSessionId: string | null | undefined;
+    const publishActiveSession = () => {
+      const sessionId = getActiveTerminalSessionId();
+      if (sessionId === lastSessionId) return;
+      lastSessionId = sessionId;
+      void emitTo("ccchan", "ccchan:active-session", { sessionId }).catch(() => {});
+    };
+
+    publishActiveSession();
+    const unsubscribe = usePanesStore.subscribe(publishActiveSession);
+    return unsubscribe;
   }, []);
 
   // 保留 terminal-exit 的 Spec 收尾链路；历史卡片回填已迁到后端，不再在这里处理。

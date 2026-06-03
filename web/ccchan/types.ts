@@ -1,8 +1,29 @@
 import type { TerminalOutput } from "@/types";
 
+export type CCChanAiEngine = "claude" | "codex";
+export type CCChanScopeMode = "global" | "focusedWindow";
+
+export interface CCChanPetSources {
+  builtin: boolean;
+  user: boolean;
+  codexHome: boolean;
+}
+
+export interface CCChanRolePreset {
+  id: string;
+  name: string;
+  aiEngine: CCChanAiEngine;
+  petId: string;
+  systemPrompt: string;
+}
+
 export interface CCChanSettings {
-  aiEngine: "claude" | "codex";
+  aiEngine: CCChanAiEngine;
   defaultPetId: string;
+  activeRoleId: string;
+  roles: CCChanRolePreset[];
+  scopeMode: CCChanScopeMode;
+  petSources: CCChanPetSources;
   autoStart: boolean;
   soundEnabled: boolean;
   windowVisible: boolean;
@@ -15,8 +36,15 @@ export interface PetMeta {
   displayName: string;
   description: string;
   spritesheetUrl: string;
+  source: "builtin" | "user" | "codexHome";
   atlas: { cellW: number; cellH: number; cols: number; rows: number };
   animations: Record<string, { row: number; frames: number; fps: number; colOffset?: number }>;
+}
+
+export interface CCChanPetInstallPreview {
+  stagingId: string;
+  pet: PetMeta;
+  sourcePath: string;
 }
 
 export interface CCChanEvent {

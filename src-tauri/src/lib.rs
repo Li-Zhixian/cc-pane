@@ -12,9 +12,10 @@ pub mod services;
 pub mod utils;
 
 use ccchan_commands::{
-    get_ccchan_pets, get_ccchan_settings, hide_ccchan, move_ccchan_window, resize_ccchan_for_chat,
-    resize_ccchan_for_menu, save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat,
-    stop_ccchan_chat,
+    get_ccchan_pets, get_ccchan_settings, hide_ccchan, install_ccchan_pet_from_path,
+    install_ccchan_pet_from_preview, move_ccchan_window, preview_ccchan_pet_from_path,
+    preview_ccchan_pet_from_url, resize_ccchan_for_chat, resize_ccchan_for_menu,
+    save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat, stop_ccchan_chat,
 };
 use ccchan_service::{CCChanService, CcChanSessionNotifier};
 use commands::{
@@ -1165,7 +1166,8 @@ pub fn run() {
                     ccchan_svc.inner().clone(),
                 )));
 
-                if ccchan_svc.settings().window_visible {
+                let ccchan_settings = ccchan_svc.settings();
+                if ccchan_settings.auto_start && ccchan_settings.window_visible {
                     if let Err(error) = ccchan_svc.show_window(&app_handle) {
                         warn!("[ccchan] failed to show startup window: {}", error);
                     }
@@ -1533,6 +1535,10 @@ pub fn run() {
             send_to_ccchan,
             stop_ccchan_chat,
             get_ccchan_pets,
+            preview_ccchan_pet_from_url,
+            preview_ccchan_pet_from_path,
+            install_ccchan_pet_from_preview,
+            install_ccchan_pet_from_path,
             get_ccchan_settings,
             save_ccchan_settings,
             // Git 命令

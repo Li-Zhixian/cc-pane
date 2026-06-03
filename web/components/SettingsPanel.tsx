@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useSettingsStore } from "@/stores";
+import { useDialogStore, useSettingsStore } from "@/stores";
 import type { AppSettings } from "@/types";
 import GeneralSection from "./settings/GeneralSection";
 import NotificationSection from "./settings/NotificationSection";
@@ -22,7 +22,7 @@ import ScreenshotSection from "./settings/ScreenshotSection";
 import SharedMcpSection from "./settings/SharedMcpSection";
 import VoiceSection from "./settings/VoiceSection";
 import CCChanSettings from "./settings/CCChanSettings";
-import { DEFAULT_CCCHAN_SETTINGS, useCCChanStore } from "@/stores/useCCChanStore";
+import { normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
 import type { CCChanSettings as CCChanSettingsValue } from "@/ccchan/types";
 
 interface SettingsPanelProps {
@@ -35,6 +35,7 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
   const settings = useSettingsStore((s) => s.settings);
   const saveSettings = useSettingsStore((s) => s.saveSettings);
   const getDefaults = useSettingsStore((s) => s.getDefaults);
+  const requestedSection = useDialogStore((s) => s.settingsSection);
 
   type SettingsDraft = AppSettings & { ccchan: CCChanSettingsValue };
 
@@ -42,10 +43,7 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
     const maybeWithCCChan = value as Partial<SettingsDraft>;
     return {
       ...value,
-      ccchan: {
-        ...DEFAULT_CCCHAN_SETTINGS,
-        ...maybeWithCCChan.ccchan,
-      },
+      ccchan: normalizeCCChanSettings(maybeWithCCChan.ccchan),
     };
   }
 
@@ -73,6 +71,12 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
       setDraft(withCCChanDraft(JSON.parse(JSON.stringify(settings))));
     }
   }, [open, settings]);
+
+  useEffect(() => {
+    if (open && requestedSection) {
+      setActiveSection(requestedSection);
+    }
+  }, [open, requestedSection]);
 
   async function handleSave() {
     try {

@@ -270,6 +270,14 @@ pub struct CCChanSettings {
     pub ai_engine: String,
     #[serde(default = "default_ccchan_pet_id")]
     pub default_pet_id: String,
+    #[serde(default = "default_ccchan_role_id")]
+    pub active_role_id: String,
+    #[serde(default)]
+    pub roles: Vec<CCChanRolePreset>,
+    #[serde(default = "default_ccchan_scope_mode")]
+    pub scope_mode: String,
+    #[serde(default)]
+    pub pet_sources: CCChanPetSources,
     #[serde(default = "default_true")]
     pub auto_start: bool,
     #[serde(default = "default_true")]
@@ -282,6 +290,27 @@ pub struct CCChanSettings {
     pub window_y: Option<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CCChanRolePreset {
+    pub id: String,
+    pub name: String,
+    pub ai_engine: String,
+    pub pet_id: String,
+    pub system_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CCChanPetSources {
+    #[serde(default = "default_true")]
+    pub builtin: bool,
+    #[serde(default = "default_true")]
+    pub user: bool,
+    #[serde(default = "default_true")]
+    pub codex_home: bool,
+}
+
 impl CCChanSettings {
     pub fn merge_missing_defaults(&mut self) {
         if !matches!(self.ai_engine.as_str(), "claude" | "codex") {
@@ -289,6 +318,28 @@ impl CCChanSettings {
         }
         if self.default_pet_id.trim().is_empty() {
             self.default_pet_id = default_ccchan_pet_id();
+        }
+        self.roles = normalize_ccchan_roles(&self.roles, &self.ai_engine, &self.default_pet_id);
+        if self.active_role_id.trim().is_empty() {
+            self.active_role_id = default_ccchan_role_id();
+        }
+        if !self.roles.iter().any(|role| role.id == self.active_role_id) {
+            self.active_role_id = self
+                .roles
+                .first()
+                .map(|role| role.id.clone())
+                .unwrap_or_else(default_ccchan_role_id);
+        }
+        if let Some(active_role) = self
+            .roles
+            .iter()
+            .find(|role| role.id == self.active_role_id)
+        {
+            self.ai_engine = active_role.ai_engine.clone();
+            self.default_pet_id = active_role.pet_id.clone();
+        }
+        if !matches!(self.scope_mode.as_str(), "global" | "focusedWindow") {
+            self.scope_mode = default_ccchan_scope_mode();
         }
     }
 }
@@ -299,6 +350,79 @@ fn default_ccchan_ai_engine() -> String {
 
 fn default_ccchan_pet_id() -> String {
     "doro.codex-pet".to_string()
+}
+
+fn default_ccchan_role_id() -> String {
+    "default".to_string()
+}
+
+fn default_ccchan_scope_mode() -> String {
+    "global".to_string()
+}
+
+fn default_ccchan_role_prompt() -> String {
+    [
+        "You are ccchan, the desktop mascot assistant inside CC-Panes.",
+        "Help the user operate CC-Panes, inspect sessions, explain stuck panes, and coordinate Claude Code or Codex work.",
+        "Keep replies concise, practical, and in the user's language.",
+    ]
+    .join("\n")
+}
+
+fn default_ccchan_role(ai_engine: &str, pet_id: &str) -> CCChanRolePreset {
+    CCChanRolePreset {
+        id: default_ccchan_role_id(),
+        name: "默认助手".to_string(),
+        ai_engine: ai_engine.to_string(),
+        pet_id: pet_id.to_string(),
+        system_prompt: default_ccchan_role_prompt(),
+    }
+}
+
+fn normalize_ccchan_roles(
+    roles: &[CCChanRolePreset],
+    fallback_ai_engine: &str,
+    fallback_pet_id: &str,
+) -> Vec<CCChanRolePreset> {
+    let fallback = default_ccchan_role(fallback_ai_engine, fallback_pet_id);
+    let mut normalized: Vec<CCChanRolePreset> = roles
+        .iter()
+        .map(|role| {
+            let mut next = role.clone();
+            if next.id.trim().is_empty() {
+                next.id = fallback.id.clone();
+            } else {
+                next.id = next.id.trim().to_string();
+            }
+            if next.name.trim().is_empty() {
+                next.name = fallback.name.clone();
+            } else {
+                next.name = next.name.trim().to_string();
+            }
+            if !matches!(next.ai_engine.as_str(), "claude" | "codex") {
+                next.ai_engine = fallback.ai_engine.clone();
+            }
+            if next.pet_id.trim().is_empty() {
+                next.pet_id = fallback.pet_id.clone();
+            } else {
+                next.pet_id = next.pet_id.trim().to_string();
+            }
+            if next.system_prompt.trim().is_empty() {
+                next.system_prompt = fallback.system_prompt.clone();
+            }
+            next
+        })
+        .collect();
+
+    if normalized.is_empty() {
+        normalized.push(fallback);
+    } else if !normalized
+        .iter()
+        .any(|role| role.id == default_ccchan_role_id())
+    {
+        normalized.insert(0, fallback);
+    }
+    normalized
 }
 
 fn default_true() -> bool {
@@ -441,11 +565,28 @@ impl Default for CCChanSettings {
         Self {
             ai_engine: default_ccchan_ai_engine(),
             default_pet_id: default_ccchan_pet_id(),
+            active_role_id: default_ccchan_role_id(),
+            roles: vec![default_ccchan_role(
+                &default_ccchan_ai_engine(),
+                &default_ccchan_pet_id(),
+            )],
+            scope_mode: default_ccchan_scope_mode(),
+            pet_sources: CCChanPetSources::default(),
             auto_start: true,
             sound_enabled: true,
             window_visible: true,
             window_x: None,
             window_y: None,
+        }
+    }
+}
+
+impl Default for CCChanPetSources {
+    fn default() -> Self {
+        Self {
+            builtin: true,
+            user: true,
+            codex_home: true,
         }
     }
 }
@@ -636,5 +777,54 @@ mod tests {
         assert_eq!(settings.mimo_model, "mimo-v2.5");
         assert_eq!(settings.language, None);
         assert_eq!(settings.max_record_seconds, 60);
+    }
+
+    #[test]
+    fn ccchan_merge_missing_defaults_migrates_legacy_settings_to_default_role() {
+        let mut settings: CCChanSettings = serde_json::from_value(serde_json::json!({
+            "aiEngine": "codex",
+            "defaultPetId": "doro.codex-pet",
+            "autoStart": true,
+            "soundEnabled": false,
+            "windowVisible": true,
+            "windowX": 12.0,
+            "windowY": 34.0
+        }))
+        .expect("legacy ccchan settings should deserialize");
+
+        settings.merge_missing_defaults();
+
+        assert_eq!(settings.active_role_id, "default");
+        assert_eq!(settings.scope_mode, "global");
+        assert_eq!(settings.pet_sources, CCChanPetSources::default());
+        assert_eq!(settings.roles.len(), 1);
+        assert_eq!(settings.roles[0].id, "default");
+        assert_eq!(settings.roles[0].ai_engine, "codex");
+        assert_eq!(settings.roles[0].pet_id, "doro.codex-pet");
+        assert!(settings.roles[0].system_prompt.contains("CC-Panes"));
+    }
+
+    #[test]
+    fn ccchan_merge_missing_defaults_syncs_legacy_fields_from_active_role() {
+        let mut settings = CCChanSettings {
+            active_role_id: "reviewer".to_string(),
+            roles: vec![
+                default_ccchan_role("claude", "homie"),
+                CCChanRolePreset {
+                    id: "reviewer".to_string(),
+                    name: "审查员".to_string(),
+                    ai_engine: "codex".to_string(),
+                    pet_id: "doro.codex-pet".to_string(),
+                    system_prompt: "Review the current work.".to_string(),
+                },
+            ],
+            ..CCChanSettings::default()
+        };
+
+        settings.merge_missing_defaults();
+
+        assert_eq!(settings.active_role_id, "reviewer");
+        assert_eq!(settings.ai_engine, "codex");
+        assert_eq!(settings.default_pet_id, "doro.codex-pet");
     }
 }

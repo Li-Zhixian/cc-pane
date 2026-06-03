@@ -3,7 +3,7 @@ import { settingsService } from "@/services";
 import type { AppSettings } from "@/types";
 import { handleErrorSilent } from "@/utils";
 import { getDefaultSidebarFavoriteLaunchActionIds } from "@/components/sidebar/launchMenu";
-import { DEFAULT_CCCHAN_SETTINGS } from "./useCCChanStore";
+import { normalizeCCChanSettings } from "./useCCChanStore";
 import type { CCChanSettings } from "@/ccchan/types";
 
 const defaultCloseToTray = () => {
@@ -27,10 +27,7 @@ function withCCChanSettings(settings: AppSettings): AppSettingsWithCCChan {
   const maybeWithCCChan = settings as Partial<AppSettingsWithCCChan>;
   return {
     ...settings,
-    ccchan: {
-      ...DEFAULT_CCCHAN_SETTINGS,
-      ...maybeWithCCChan.ccchan,
-    },
+    ccchan: normalizeCCChanSettings(maybeWithCCChan.ccchan),
   };
 }
 

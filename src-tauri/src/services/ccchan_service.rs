@@ -9,6 +9,7 @@ use crate::utils::{AppError, AppPaths, AppResult};
 use cc_panes_core::events::SessionNotifier;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{
@@ -21,16 +22,27 @@ const CCCHAN_WINDOW_LABEL: &str = "ccchan";
 const CCCHAN_EVENT: &str = "ccchan-event";
 const CCCHAN_HELPER_PROMPT: &str =
     include_str!("../../resources/claude-bundle/default-skills/ccchan-helper.md");
+const MAX_PET_PACKAGE_BYTES: usize = 30 * 1024 * 1024;
+const MAX_PET_FILES: usize = 128;
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PetMeta {
     pub id: String,
     pub display_name: String,
     pub description: String,
     pub spritesheet_url: String,
+    pub source: PetSource,
     pub atlas: PetAtlas,
     pub animations: HashMap<String, PetAnimation>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PetSource {
+    Builtin,
+    User,
+    CodexHome,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,12 +72,26 @@ struct PetsManifest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PetDefinition {
+    #[serde(default)]
     id: String,
+    #[serde(default)]
     display_name: String,
+    #[serde(default)]
     description: String,
+    #[serde(default)]
     spritesheet_path: String,
+    #[serde(default)]
     atlas: PetAtlas,
+    #[serde(default = "default_pet_animations")]
     animations: HashMap<String, PetAnimation>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PetInstallPreview {
+    pub staging_id: String,
+    pub pet: PetMeta,
+    pub source_path: String,
 }
 
 pub struct CCChanService {
@@ -117,6 +143,7 @@ impl CCChanService {
         window
             .show()
             .map_err(|error| AppError::from(error.to_string()))?;
+        self.set_window_visible(true)?;
         Ok(())
     }
 
@@ -125,6 +152,7 @@ impl CCChanService {
         window
             .hide()
             .map_err(|error| AppError::from(error.to_string()))?;
+        self.set_window_visible(false)?;
         Ok(())
     }
 
@@ -136,29 +164,153 @@ impl CCChanService {
     }
 
     pub fn get_pets(&self, app: &AppHandle) -> AppResult<Vec<PetMeta>> {
-        let root = resolve_ccchan_root(app)?;
-        let manifest_path = root.join("pets-manifest.json");
-        let manifest_content = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        self.discover_pets(app)
+    }
+
+    pub async fn preview_pet_from_url(&self, url: String) -> AppResult<PetInstallPreview> {
+        let parsed = reqwest::Url::parse(url.trim()).map_err(|error| {
             AppError::from(format!(
-                "Failed to read {}: {}",
-                manifest_path.display(),
+                "Invalid ccchan pet URL '{}': {}",
+                url.trim(),
                 error
             ))
         })?;
-        let manifest: PetsManifest = serde_json::from_str(&manifest_content)
-            .map_err(|error| AppError::from(format!("Invalid pets manifest: {error}")))?;
+        if parsed.scheme() != "https" {
+            return Err(AppError::from(
+                "ccchan pet URL installs require an https:// URL",
+            ));
+        }
 
-        manifest
-            .pets
-            .iter()
-            .map(|pet_id| self.load_pet(&root, pet_id))
-            .collect()
+        let response = reqwest::get(parsed.clone())
+            .await
+            .map_err(|error| AppError::from(format!("Failed to download pet package: {error}")))?;
+        if !response.status().is_success() {
+            return Err(AppError::from(format!(
+                "Failed to download pet package: HTTP {}",
+                response.status()
+            )));
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| AppError::from(format!("Failed to read pet package: {error}")))?;
+        if bytes.len() > MAX_PET_PACKAGE_BYTES {
+            return Err(AppError::from(format!(
+                "Pet package is too large: {} bytes",
+                bytes.len()
+            )));
+        }
+
+        let staging_id = uuid::Uuid::new_v4().to_string();
+        let staging_dir = self.pet_staging_dir().join(&staging_id);
+        std::fs::create_dir_all(&staging_dir)?;
+        let path_ext = Path::new(parsed.path())
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if path_ext != "zip" {
+            return Err(AppError::from(
+                "ccchan URL installs currently require a .zip pet package",
+            ));
+        }
+        extract_pet_zip(&bytes, &staging_dir)?;
+
+        let pet_root = find_pet_root(&staging_dir)?;
+        let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
+        Ok(PetInstallPreview {
+            staging_id,
+            pet,
+            source_path: parsed.to_string(),
+        })
+    }
+
+    pub fn preview_pet_from_path(&self, path: String) -> AppResult<PetInstallPreview> {
+        let source = PathBuf::from(path.trim());
+        let mut staging_id = String::new();
+        let pet_root = if source.is_file()
+            && source
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            let bytes = std::fs::read(&source).map_err(|error| {
+                AppError::from(format!(
+                    "Failed to read pet zip {}: {}",
+                    source.display(),
+                    error
+                ))
+            })?;
+            if bytes.len() > MAX_PET_PACKAGE_BYTES {
+                return Err(AppError::from(format!(
+                    "Pet package is too large: {} bytes",
+                    bytes.len()
+                )));
+            }
+            staging_id = uuid::Uuid::new_v4().to_string();
+            let staging_dir = self.pet_staging_dir().join(&staging_id);
+            std::fs::create_dir_all(&staging_dir)?;
+            extract_pet_zip(&bytes, &staging_dir)?;
+            find_pet_root(&staging_dir)?
+        } else {
+            find_pet_root(&source)?
+        };
+        let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
+        Ok(PetInstallPreview {
+            staging_id,
+            pet,
+            source_path: source.to_string_lossy().to_string(),
+        })
+    }
+
+    pub fn install_pet_from_preview(&self, staging_id: String) -> AppResult<PetMeta> {
+        if staging_id.trim().is_empty() {
+            return Err(AppError::from("ccchan pet preview staging id is required"));
+        }
+        let staging_dir = self
+            .pet_staging_dir()
+            .join(sanitize_path_segment(&staging_id));
+        let pet_root = find_pet_root(&staging_dir)?;
+        self.install_pet_dir(&pet_root)
+    }
+
+    pub fn install_pet_from_path(&self, path: String) -> AppResult<PetMeta> {
+        let source = PathBuf::from(path.trim());
+        let pet_root = if source.is_file()
+            && source
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            let bytes = std::fs::read(&source).map_err(|error| {
+                AppError::from(format!(
+                    "Failed to read pet zip {}: {}",
+                    source.display(),
+                    error
+                ))
+            })?;
+            if bytes.len() > MAX_PET_PACKAGE_BYTES {
+                return Err(AppError::from(format!(
+                    "Pet package is too large: {} bytes",
+                    bytes.len()
+                )));
+            }
+            let staging_id = uuid::Uuid::new_v4().to_string();
+            let staging_dir = self.pet_staging_dir().join(&staging_id);
+            std::fs::create_dir_all(&staging_dir)?;
+            extract_pet_zip(&bytes, &staging_dir)?;
+            find_pet_root(&staging_dir)?
+        } else {
+            find_pet_root(&source)?
+        };
+        self.install_pet_dir(&pet_root)
     }
 
     pub fn start_chat(
         &self,
         terminal_service: Arc<TerminalService>,
         ai_engine: String,
+        system_prompt: Option<String>,
     ) -> AppResult<String> {
         let cli_tool = parse_ai_engine(&ai_engine)?;
         let chat_dir = self.app_paths.data_dir().join("ccchan");
@@ -175,6 +327,7 @@ impl CCChanService {
         }
 
         let chat_dir_str = chat_dir.to_string_lossy().to_string();
+        let prompt = build_ccchan_prompt(system_prompt.as_deref());
         let session_id = terminal_service.create_session(
             None,
             &chat_dir_str,
@@ -189,7 +342,7 @@ impl CCChanService {
             cli_tool,
             None,
             false,
-            Some(CCCHAN_HELPER_PROMPT),
+            Some(&prompt),
             None,
             None,
             None,
@@ -237,35 +390,95 @@ impl CCChanService {
         self.emit_ccchan_event("task-waiting", session_id, true);
     }
 
-    #[allow(dead_code)]
     fn set_window_visible(&self, visible: bool) -> AppResult<()> {
         let mut settings = self.settings();
         settings.window_visible = visible;
         self.save_settings(settings)
     }
 
-    fn load_pet(&self, root: &Path, pet_id: &str) -> AppResult<PetMeta> {
-        let pet_dir = root.join(pet_id);
-        let pet_json_path = pet_dir.join("pet.json");
-        let pet_content = std::fs::read_to_string(&pet_json_path).map_err(|error| {
+    fn discover_pets(&self, app: &AppHandle) -> AppResult<Vec<PetMeta>> {
+        let mut pets: HashMap<String, PetMeta> = HashMap::new();
+        let settings = self.settings();
+
+        if settings.pet_sources.builtin {
+            let root = resolve_ccchan_root(app)?;
+            for pet in load_manifest_pets(&root, PetSource::Builtin)? {
+                pets.insert(pet.id.clone(), pet);
+            }
+        }
+
+        if settings.pet_sources.codex_home {
+            if let Some(codex_pets_dir) = codex_home_pets_dir() {
+                for pet in self.load_pet_dir_children(&codex_pets_dir, PetSource::CodexHome)? {
+                    pets.entry(pet.id.clone()).or_insert(pet);
+                }
+            }
+        }
+
+        if settings.pet_sources.user {
+            for pet in self.load_pet_dir_children(&self.user_pets_dir(), PetSource::User)? {
+                pets.insert(pet.id.clone(), pet);
+            }
+        }
+
+        let mut result: Vec<PetMeta> = pets.into_values().collect();
+        result.sort_by(|a, b| {
+            source_rank(a.source)
+                .cmp(&source_rank(b.source))
+                .then_with(|| a.display_name.cmp(&b.display_name))
+        });
+        Ok(result)
+    }
+
+    fn load_pet_dir_children(&self, root: &Path, source: PetSource) -> AppResult<Vec<PetMeta>> {
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut pets = Vec::new();
+        for entry in std::fs::read_dir(root).map_err(|error| {
             AppError::from(format!(
-                "Failed to read {}: {}",
-                pet_json_path.display(),
+                "Failed to read pet directory {}: {}",
+                root.display(),
                 error
             ))
-        })?;
-        let definition: PetDefinition = serde_json::from_str(&pet_content)
-            .map_err(|error| AppError::from(format!("Invalid pet.json for {pet_id}: {error}")))?;
-        let spritesheet_path = pet_dir.join(&definition.spritesheet_path);
+        })? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            match load_pet_from_dir(&path, source) {
+                Ok(pet) => pets.push(pet),
+                Err(error) => {
+                    warn!(path = %path.display(), error = %error, "skipping invalid ccchan pet")
+                }
+            }
+        }
+        Ok(pets)
+    }
 
-        Ok(PetMeta {
-            id: definition.id,
-            display_name: definition.display_name,
-            description: definition.description,
-            spritesheet_url: file_asset_url(&spritesheet_path),
-            atlas: definition.atlas,
-            animations: definition.animations,
-        })
+    fn install_pet_dir(&self, pet_root: &Path) -> AppResult<PetMeta> {
+        let pet = load_pet_from_dir(pet_root, PetSource::User)?;
+        let target = self.user_pets_dir().join(sanitize_path_segment(&pet.id));
+        if target.exists() {
+            std::fs::remove_dir_all(&target).map_err(|error| {
+                AppError::from(format!(
+                    "Failed to replace existing pet {}: {}",
+                    target.display(),
+                    error
+                ))
+            })?;
+        }
+        copy_pet_dir(pet_root, &target)?;
+        load_pet_from_dir(&target, PetSource::User)
+    }
+
+    fn user_pets_dir(&self) -> PathBuf {
+        self.app_paths.data_dir().join("ccchan").join("pets")
+    }
+
+    fn pet_staging_dir(&self) -> PathBuf {
+        self.app_paths.data_dir().join("ccchan").join("pet-staging")
     }
 
     fn take_chat_session_id(&self) -> AppResult<Option<String>> {
@@ -453,6 +666,313 @@ fn parse_ai_engine(ai_engine: &str) -> AppResult<CliTool> {
             other
         ))),
     }
+}
+
+fn build_ccchan_prompt(system_prompt: Option<&str>) -> String {
+    let Some(system_prompt) = system_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return CCCHAN_HELPER_PROMPT.to_string();
+    };
+    format!("{CCCHAN_HELPER_PROMPT}\n\n# Active ccchan Role\n\n{system_prompt}\n")
+}
+
+fn load_manifest_pets(root: &Path, source: PetSource) -> AppResult<Vec<PetMeta>> {
+    let manifest_path = root.join("pets-manifest.json");
+    let manifest_content = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read {}: {}",
+            manifest_path.display(),
+            error
+        ))
+    })?;
+    let manifest: PetsManifest = serde_json::from_str(&manifest_content)
+        .map_err(|error| AppError::from(format!("Invalid pets manifest: {error}")))?;
+    manifest
+        .pets
+        .iter()
+        .map(|pet_id| load_pet_from_dir(&root.join(pet_id), source))
+        .collect()
+}
+
+fn load_pet_from_dir(pet_dir: &Path, source: PetSource) -> AppResult<PetMeta> {
+    let pet_json_path = pet_dir.join("pet.json");
+    let pet_content = std::fs::read_to_string(&pet_json_path).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read {}: {}",
+            pet_json_path.display(),
+            error
+        ))
+    })?;
+    let definition: PetDefinition = serde_json::from_str(&pet_content).map_err(|error| {
+        AppError::from(format!(
+            "Invalid pet.json for {}: {error}",
+            pet_dir.display()
+        ))
+    })?;
+    let pet_id = if definition.id.trim().is_empty() {
+        pet_dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("ccchan-pet")
+            .to_string()
+    } else {
+        definition.id.trim().to_string()
+    };
+    let spritesheet_path = resolve_spritesheet_path(pet_dir, &definition.spritesheet_path)?;
+
+    Ok(PetMeta {
+        id: pet_id.clone(),
+        display_name: non_empty_or(definition.display_name, &pet_id),
+        description: non_empty_or(definition.description, "Custom ccchan pet"),
+        spritesheet_url: file_asset_url(&spritesheet_path),
+        source,
+        atlas: definition.atlas,
+        animations: definition.animations,
+    })
+}
+
+fn default_pet_atlas() -> PetAtlas {
+    PetAtlas {
+        cell_w: 192,
+        cell_h: 208,
+        cols: 8,
+        rows: 9,
+    }
+}
+
+impl Default for PetAtlas {
+    fn default() -> Self {
+        default_pet_atlas()
+    }
+}
+
+fn default_pet_animations() -> HashMap<String, PetAnimation> {
+    HashMap::from([
+        (
+            "idle".to_string(),
+            PetAnimation {
+                row: 0,
+                frames: 6,
+                fps: 6,
+                col_offset: 0,
+            },
+        ),
+        (
+            "walking".to_string(),
+            PetAnimation {
+                row: 1,
+                frames: 8,
+                fps: 8,
+                col_offset: 0,
+            },
+        ),
+        (
+            "thinking".to_string(),
+            PetAnimation {
+                row: 8,
+                frames: 6,
+                fps: 8,
+                col_offset: 0,
+            },
+        ),
+        (
+            "waiting".to_string(),
+            PetAnimation {
+                row: 6,
+                frames: 6,
+                fps: 6,
+                col_offset: 0,
+            },
+        ),
+        (
+            "working".to_string(),
+            PetAnimation {
+                row: 7,
+                frames: 6,
+                fps: 12,
+                col_offset: 0,
+            },
+        ),
+        (
+            "happy".to_string(),
+            PetAnimation {
+                row: 3,
+                frames: 4,
+                fps: 10,
+                col_offset: 0,
+            },
+        ),
+        (
+            "sad".to_string(),
+            PetAnimation {
+                row: 5,
+                frames: 8,
+                fps: 6,
+                col_offset: 0,
+            },
+        ),
+        (
+            "jumping".to_string(),
+            PetAnimation {
+                row: 4,
+                frames: 5,
+                fps: 6,
+                col_offset: 0,
+            },
+        ),
+    ])
+}
+
+fn codex_home_pets_dir() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+        .map(|home| home.join("pets"))
+}
+
+fn source_rank(source: PetSource) -> u8 {
+    match source {
+        PetSource::User => 0,
+        PetSource::Builtin => 1,
+        PetSource::CodexHome => 2,
+    }
+}
+
+fn find_pet_root(path: &Path) -> AppResult<PathBuf> {
+    if path.join("pet.json").exists() {
+        return Ok(path.to_path_buf());
+    }
+    if path.is_file() {
+        return Err(AppError::from(format!(
+            "ccchan pet path is not a directory or zip: {}",
+            path.display()
+        )));
+    }
+    for entry in std::fs::read_dir(path).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read pet path {}: {}",
+            path.display(),
+            error
+        ))
+    })? {
+        let entry = entry?;
+        let child = entry.path();
+        if child.is_dir() && child.join("pet.json").exists() {
+            return Ok(child);
+        }
+    }
+    Err(AppError::from(format!(
+        "No pet.json found in {}",
+        path.display()
+    )))
+}
+
+fn resolve_spritesheet_path(pet_dir: &Path, configured_path: &str) -> AppResult<PathBuf> {
+    let configured = configured_path.trim();
+    let candidates: Vec<PathBuf> = if configured.is_empty() {
+        vec![
+            pet_dir.join("spritesheet.webp"),
+            pet_dir.join("spritesheet.png"),
+            pet_dir.join("spritesheet.gif"),
+        ]
+    } else {
+        vec![pet_dir.join(configured)]
+    };
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| AppError::from(format!("No spritesheet found in {}", pet_dir.display())))
+}
+
+fn non_empty_or(value: String, fallback: &str) -> String {
+    if value.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        value
+    }
+}
+
+fn sanitize_path_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .trim_matches('-')
+        .to_string()
+}
+
+fn copy_pet_dir(source: &Path, target: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(target)?;
+    for entry in std::fs::read_dir(source).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read pet directory {}: {}",
+            source.display(),
+            error
+        ))
+    })? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_pet_dir(&source_path, &target_path)?;
+        } else {
+            std::fs::copy(&source_path, &target_path).map_err(|error| {
+                AppError::from(format!(
+                    "Failed to copy pet file {}: {}",
+                    source_path.display(),
+                    error
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_pet_zip(bytes: &[u8], target: &Path) -> AppResult<()> {
+    let reader = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader)
+        .map_err(|error| AppError::from(format!("Invalid pet zip archive: {error}")))?;
+    if archive.len() > MAX_PET_FILES {
+        return Err(AppError::from(format!(
+            "Pet zip contains too many files: {}",
+            archive.len()
+        )));
+    }
+    let mut total_size = 0usize;
+    for index in 0..archive.len() {
+        let mut file = archive
+            .by_index(index)
+            .map_err(|error| AppError::from(format!("Invalid pet zip entry: {error}")))?;
+        let Some(enclosed_name) = file.enclosed_name().map(|path| path.to_path_buf()) else {
+            return Err(AppError::from("Pet zip contains an unsafe path"));
+        };
+        let out_path = target.join(enclosed_name);
+        if file.is_dir() {
+            std::fs::create_dir_all(&out_path)?;
+            continue;
+        }
+        total_size = total_size.saturating_add(file.size() as usize);
+        if total_size > MAX_PET_PACKAGE_BYTES {
+            return Err(AppError::from("Pet zip extracted size is too large"));
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)
+            .map_err(|error| AppError::from(format!("Failed to read pet zip entry: {error}")))?;
+        std::fs::write(out_path, contents)?;
+    }
+    Ok(())
 }
 
 fn resolve_ccchan_root(app: &AppHandle) -> AppResult<PathBuf> {

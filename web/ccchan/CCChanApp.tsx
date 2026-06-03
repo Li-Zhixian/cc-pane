@@ -50,6 +50,7 @@ export function CCChanApp() {
   const [eventState, setEventState] = useState<CCChanPetState | null>(null);
   const [eggState, setEggState] = useState<CCChanPetState | null>(null);
   const [bubbleText, setBubbleText] = useState<string | null>(null);
+  const [activeMainSessionId, setActiveMainSessionId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<CCChanContextMenuPosition | null>(null);
   const [menuOwnsResize, setMenuOwnsResize] = useState(false);
   const dragStartedAtRef = useRef<number | null>(null);
@@ -61,9 +62,11 @@ export function CCChanApp() {
   );
 
   const aggregateState = useMemo(() => {
-    const statuses = Array.from(statusMap.values()).map((info) => info.status as TerminalStatusType);
+    const statuses = Array.from(statusMap.values())
+      .filter((info) => settings.scopeMode === "global" || info.sessionId === activeMainSessionId)
+      .map((info) => info.status as TerminalStatusType);
     return aggregateStatus(statuses);
-  }, [statusMap]);
+  }, [activeMainSessionId, settings.scopeMode, statusMap]);
 
   const petState = eventState ?? eggState ?? aggregateState;
 
@@ -165,6 +168,21 @@ export function CCChanApp() {
     style.textContent = "html, body, #root { background: transparent !important; margin: 0; padding: 0; overflow: hidden; }";
     document.head.appendChild(style);
     return () => style.remove();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    listen<{ sessionId?: string | null }>("ccchan:active-session", (event) => {
+      if (!cancelled) setActiveMainSessionId(event.payload?.sessionId ?? null);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {

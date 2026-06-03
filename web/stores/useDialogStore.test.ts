@@ -5,6 +5,7 @@ describe("useDialogStore", () => {
   beforeEach(() => {
     useDialogStore.setState({
       settingsOpen: false,
+      settingsSection: null,
       journalOpen: false,
       journalWorkspaceName: "",
       localHistoryOpen: false,
@@ -22,6 +23,7 @@ describe("useDialogStore", () => {
     it("所有 dialog 应全部关闭", () => {
       const state = useDialogStore.getState();
       expect(state.settingsOpen).toBe(false);
+      expect(state.settingsSection).toBeNull();
       expect(state.journalOpen).toBe(false);
       expect(state.journalWorkspaceName).toBe("");
       expect(state.localHistoryOpen).toBe(false);
@@ -39,6 +41,12 @@ describe("useDialogStore", () => {
     it("openSettings 应设置 settingsOpen 为 true", () => {
       useDialogStore.getState().openSettings();
       expect(useDialogStore.getState().settingsOpen).toBe(true);
+    });
+
+    it("openSettings 可指定初始 section", () => {
+      useDialogStore.getState().openSettings("ccchan");
+      expect(useDialogStore.getState().settingsOpen).toBe(true);
+      expect(useDialogStore.getState().settingsSection).toBe("ccchan");
     });
 
     it("closeSettings 应设置 settingsOpen 为 false", () => {
