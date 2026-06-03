@@ -20,9 +20,20 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   const outputRef = useRef<HTMLDivElement>(null);
   const startingRef = useRef(false);
   const activeRole = settings.roles.find((role) => role.id === settings.activeRoleId) ?? settings.roles[0];
+  const roleSessionKey = activeRole ? `${activeRole.id}:${activeRole.aiEngine}:${activeRole.systemPrompt}` : "default";
+  const previousRoleSessionKeyRef = useRef(roleSessionKey);
   const aiEngine = activeRole?.aiEngine ?? settings.aiEngine;
   const roleName = activeRole?.name ?? "默认助手";
   const systemPrompt = activeRole?.systemPrompt;
+
+  useEffect(() => {
+    if (previousRoleSessionKeyRef.current === roleSessionKey) return;
+    previousRoleSessionKeyRef.current = roleSessionKey;
+    if (!sessionId) return;
+    invoke("stop_ccchan_chat", { sessionId }).catch(() => {});
+    onSessionIdChange(null);
+    setLines([]);
+  }, [onSessionIdChange, roleSessionKey, sessionId]);
 
   useEffect(() => {
     let cancelled = false;

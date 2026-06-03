@@ -477,6 +477,7 @@ impl CodexAdapter {
         let features_table = features
             .as_table_mut()
             .ok_or_else(|| anyhow!("Codex config [features] must be a TOML table"))?;
+        features_table.insert("hooks".to_string(), toml::Value::Boolean(true));
         features_table.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
         Self::write_config_toml(project_path, &config)
     }
@@ -744,6 +745,7 @@ mod tests {
         let config = fs::read_to_string(project_path.join(".codex").join("config.toml")).unwrap();
         let hooks = fs::read_to_string(project_path.join(".codex").join("hooks.json")).unwrap();
 
+        assert!(config.contains("hooks = true"));
         assert!(config.contains("codex_hooks = true"));
         assert!(hooks.contains("SessionStart"));
         assert!(hooks.contains("session-init"));
@@ -781,6 +783,7 @@ mod tests {
         let config = fs::read_to_string(project_path.join(".codex").join("config.toml")).unwrap();
         let hooks = fs::read_to_string(project_path.join(".codex").join("hooks.json")).unwrap();
 
+        assert!(config.contains("hooks = true"));
         assert!(config.contains("codex_hooks = true"));
         assert!(hooks.contains("/mnt/c/Users/wuxiran"));
         assert!(hooks.contains("session-init"));

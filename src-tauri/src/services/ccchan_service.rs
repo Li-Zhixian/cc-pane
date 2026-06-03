@@ -306,6 +306,32 @@ impl CCChanService {
         self.install_pet_dir(&pet_root)
     }
 
+    pub fn delete_user_pet(&self, pet_id: String) -> AppResult<()> {
+        let requested_pet_id = pet_id.trim().to_string();
+        let pet_dir_name = sanitized_pet_dir_name(&requested_pet_id)?;
+        let pet_dir = self.user_pets_dir().join(&pet_dir_name);
+        if !pet_dir.exists() {
+            return Err(AppError::NotFound(format!(
+                "ccchan user pet '{}' not found",
+                requested_pet_id
+            )));
+        }
+        let installed = load_pet_from_dir(&pet_dir, PetSource::User)?;
+        if installed.id != requested_pet_id {
+            return Err(AppError::from(format!(
+                "ccchan user pet id mismatch: requested '{}', found '{}'",
+                requested_pet_id, installed.id
+            )));
+        }
+        std::fs::remove_dir_all(&pet_dir).map_err(|error| {
+            AppError::from(format!(
+                "Failed to delete ccchan user pet {}: {}",
+                pet_dir.display(),
+                error
+            ))
+        })
+    }
+
     pub fn start_chat(
         &self,
         terminal_service: Arc<TerminalService>,
@@ -363,8 +389,7 @@ impl CCChanService {
         session_id: &str,
         text: &str,
     ) -> AppResult<()> {
-        terminal_service.write(session_id, text)?;
-        terminal_service.write(session_id, "\r")?;
+        terminal_service.submit_text_to_session(session_id, text)?;
         Ok(())
     }
 
@@ -459,7 +484,8 @@ impl CCChanService {
 
     fn install_pet_dir(&self, pet_root: &Path) -> AppResult<PetMeta> {
         let pet = load_pet_from_dir(pet_root, PetSource::User)?;
-        let target = self.user_pets_dir().join(sanitize_path_segment(&pet.id));
+        let pet_dir_name = sanitized_pet_dir_name(&pet.id)?;
+        let target = self.user_pets_dir().join(pet_dir_name);
         if target.exists() {
             std::fs::remove_dir_all(&target).map_err(|error| {
                 AppError::from(format!(
@@ -878,7 +904,8 @@ fn resolve_spritesheet_path(pet_dir: &Path, configured_path: &str) -> AppResult<
             pet_dir.join("spritesheet.gif"),
         ]
     } else {
-        vec![pet_dir.join(configured)]
+        let relative_path = safe_relative_pet_path(configured)?;
+        vec![pet_dir.join(relative_path)]
     };
     candidates
         .into_iter()
@@ -908,6 +935,32 @@ fn sanitize_path_segment(value: &str) -> String {
         .trim_matches('.')
         .trim_matches('-')
         .to_string()
+}
+
+fn sanitized_pet_dir_name(pet_id: &str) -> AppResult<String> {
+    let dir_name = sanitize_path_segment(pet_id);
+    if dir_name.is_empty() {
+        return Err(AppError::from(format!(
+            "ccchan pet id '{}' cannot be used as an install directory",
+            pet_id
+        )));
+    }
+    Ok(dir_name)
+}
+
+fn safe_relative_pet_path(value: &str) -> AppResult<PathBuf> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(AppError::from(format!(
+            "ccchan pet asset path must stay inside the pet folder: {}",
+            value
+        )));
+    }
+    Ok(path.to_path_buf())
 }
 
 fn copy_pet_dir(source: &Path, target: &Path) -> AppResult<()> {
@@ -1011,4 +1064,152 @@ fn current_epoch_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::tempdir;
+    use zip::write::SimpleFileOptions;
+
+    fn write_minimal_pet(dir: &Path, id: &str) {
+        std::fs::create_dir_all(dir).expect("create pet dir");
+        std::fs::write(
+            dir.join("pet.json"),
+            format!(
+                r#"{{
+                  "id": "{id}",
+                  "displayName": "",
+                  "description": "",
+                  "spritesheetPath": "spritesheet.webp"
+                }}"#
+            ),
+        )
+        .expect("write pet.json");
+        std::fs::write(dir.join("spritesheet.webp"), [1_u8, 2, 3]).expect("write sprite");
+    }
+
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        for (path, bytes) in entries {
+            zip.start_file(*path, SimpleFileOptions::default())
+                .expect("start file");
+            zip.write_all(bytes).expect("write file");
+        }
+        zip.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn load_pet_from_dir_applies_codex_defaults() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("sample");
+        write_minimal_pet(&pet_dir, "sample");
+
+        let pet = load_pet_from_dir(&pet_dir, PetSource::User).expect("load pet");
+
+        assert_eq!(pet.id, "sample");
+        assert_eq!(pet.display_name, "sample");
+        assert_eq!(pet.description, "Custom ccchan pet");
+        assert_eq!(pet.source, PetSource::User);
+        assert_eq!(pet.atlas.cell_w, 192);
+        assert!(pet.animations.contains_key("working"));
+    }
+
+    #[test]
+    fn find_pet_root_accepts_parent_folder_with_single_pet_child() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("nested").join("sample");
+        write_minimal_pet(&pet_dir, "sample");
+
+        let root = find_pet_root(&temp.path().join("nested")).expect("find pet root");
+
+        assert_eq!(root, pet_dir);
+    }
+
+    #[test]
+    fn extract_pet_zip_rejects_unsafe_paths() {
+        let temp = tempdir().expect("tempdir");
+        let bytes = zip_bytes(&[("../pet.json", b"{}")]);
+
+        let error = extract_pet_zip(&bytes, temp.path()).expect_err("zip slip rejected");
+
+        assert!(error.to_string().contains("unsafe path"));
+    }
+
+    #[test]
+    fn extract_pet_zip_extracts_valid_pet_package() {
+        let temp = tempdir().expect("tempdir");
+        let bytes = zip_bytes(&[
+            (
+                "sample/pet.json",
+                br#"{"id":"sample","spritesheetPath":"spritesheet.webp"}"#,
+            ),
+            ("sample/spritesheet.webp", &[1_u8, 2, 3]),
+        ]);
+
+        extract_pet_zip(&bytes, temp.path()).expect("extract zip");
+
+        let root = find_pet_root(temp.path()).expect("find pet root");
+        let pet = load_pet_from_dir(&root, PetSource::User).expect("load pet");
+        assert_eq!(pet.id, "sample");
+    }
+
+    #[test]
+    fn sanitize_path_segment_blocks_path_separators() {
+        assert_eq!(sanitize_path_segment("../sample"), "sample");
+        assert_eq!(sanitize_path_segment("sample/pet"), "sample-pet");
+        assert_eq!(sanitize_path_segment("sample\\pet"), "sample-pet");
+    }
+
+    #[test]
+    fn sanitized_pet_dir_name_rejects_unusable_ids() {
+        let error = sanitized_pet_dir_name("猫").expect_err("non ascii id should not install");
+
+        assert!(error.to_string().contains("install directory"));
+    }
+
+    #[test]
+    fn safe_relative_pet_path_rejects_paths_outside_pet_folder() {
+        assert!(safe_relative_pet_path("spritesheet.webp").is_ok());
+        assert!(safe_relative_pet_path("assets/spritesheet.webp").is_ok());
+        assert!(safe_relative_pet_path("../spritesheet.webp").is_err());
+        assert!(safe_relative_pet_path("/tmp/spritesheet.webp").is_err());
+    }
+
+    #[test]
+    fn load_pet_from_dir_rejects_spritesheet_path_traversal() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("sample");
+        std::fs::create_dir_all(&pet_dir).expect("create pet dir");
+        std::fs::write(
+            pet_dir.join("pet.json"),
+            br#"{"id":"sample","spritesheetPath":"../spritesheet.webp"}"#,
+        )
+        .expect("write pet.json");
+        std::fs::write(temp.path().join("spritesheet.webp"), [1_u8, 2, 3]).expect("write sprite");
+
+        let error = load_pet_from_dir(&pet_dir, PetSource::User).expect_err("reject traversal");
+
+        assert!(error.to_string().contains("inside the pet folder"));
+    }
+
+    #[test]
+    fn load_pet_from_dir_uses_folder_name_when_id_missing() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("folder-id");
+        std::fs::create_dir_all(&pet_dir).expect("create pet dir");
+        std::fs::write(
+            pet_dir.join("pet.json"),
+            br#"{"spritesheetPath":"spritesheet.webp"}"#,
+        )
+        .expect("write pet.json");
+        std::fs::write(pet_dir.join("spritesheet.webp"), [1_u8, 2, 3]).expect("write sprite");
+
+        let pet = load_pet_from_dir(&pet_dir, PetSource::User).expect("load pet");
+
+        assert_eq!(pet.id, "folder-id");
+        assert_eq!(pet.display_name, "folder-id");
+    }
 }

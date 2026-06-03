@@ -259,16 +259,36 @@ function MainApp() {
   useEffect(() => {
     if (!isTauriReady()) return;
     let lastSessionId: string | null | undefined;
+    let cancelled = false;
+    let unlistenReady: (() => void) | null = null;
     const publishActiveSession = () => {
       const sessionId = getActiveTerminalSessionId();
       if (sessionId === lastSessionId) return;
       lastSessionId = sessionId;
       void emitTo("ccchan", "ccchan:active-session", { sessionId }).catch(() => {});
     };
+    const republishActiveSession = () => {
+      lastSessionId = undefined;
+      publishActiveSession();
+    };
 
     publishActiveSession();
     const unsubscribe = usePanesStore.subscribe(publishActiveSession);
-    return unsubscribe;
+
+    listen("ccchan:ready", () => {
+      if (!cancelled) republishActiveSession();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenReady = fn;
+    }).catch((error) => {
+      console.warn("ccchan ready listener failed:", error);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      unlistenReady?.();
+    };
   }, []);
 
   // 保留 terminal-exit 的 Spec 收尾链路；历史卡片回填已迁到后端，不再在这里处理。

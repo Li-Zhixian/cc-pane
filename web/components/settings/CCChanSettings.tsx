@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, FolderPlus, MapPin, Music, Power, Sparkles } from "lucide-react";
+import { Bot, Download, ExternalLink, FolderPlus, MapPin, Music, Power, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -19,11 +20,18 @@ const ENGINE_OPTIONS = [
   { value: "codex", label: "Codex" },
 ] as const;
 
+const PET_RESOURCE_LINKS = [
+  { label: "Codex Pets", url: "https://codex-pets.net/#/?sort=popular" },
+  { label: "awesome-codex-pet", url: "https://github.com/legeling/awesome-codex-pet" },
+  { label: "Codex 官方说明", url: "https://developers.openai.com/codex/app/settings#codex-pets" },
+] as const;
+
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
   const petOptions = pets.length > 0 ? pets : [FALLBACK_PET];
   const activeRole = value.roles.find((role) => role.id === value.activeRoleId) ?? value.roles[0];
+  const userPets = petOptions.filter((pet) => pet.source === "user");
 
   useEffect(() => {
     void load();
@@ -110,6 +118,43 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       toast.success("桌宠已安装");
     } catch (error) {
       toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function replaceDeletedPetReferences(petId: string): CCChanSettingsValue {
+    const fallbackPetId = petOptions.find((pet) => pet.id !== petId)?.id ?? FALLBACK_PET.id;
+    const roles = value.roles.map((role) =>
+      role.petId === petId ? { ...role, petId: fallbackPetId } : role,
+    );
+    return normalizeCCChanSettings({
+      ...value,
+      defaultPetId: value.defaultPetId === petId ? fallbackPetId : value.defaultPetId,
+      roles,
+    });
+  }
+
+  async function deleteUserPet(petId: string) {
+    const pet = petOptions.find((item) => item.id === petId);
+    if (!pet || pet.source !== "user") return;
+    const confirmed = window.confirm(`删除用户安装的桌宠 "${pet.displayName}" (${pet.id})？`);
+    if (!confirmed) return;
+    try {
+      await invoke("delete_ccchan_user_pet", { petId: pet.id });
+      const nextSettings = replaceDeletedPetReferences(pet.id);
+      await useCCChanStore.getState().saveSettings(nextSettings);
+      onChange(nextSettings);
+      await load();
+      toast.success("桌宠已删除");
+    } catch (error) {
+      toast.error(`删除失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function openPetResource(url: string) {
+    try {
+      await openUrl(url);
+    } catch (error) {
+      toast.error(`打开链接失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -298,7 +343,40 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
             <Download size={14} />
             URL 安装
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={petOptions.find((item) => item.id === value.defaultPetId)?.source !== "user"}
+            onClick={() => void deleteUserPet(value.defaultPetId)}
+          >
+            删除当前用户宠物
+          </Button>
         </div>
+        <div className="flex flex-wrap gap-2">
+          {PET_RESOURCE_LINKS.map((link) => (
+            <Button key={link.url} type="button" size="sm" variant="ghost" onClick={() => void openPetResource(link.url)}>
+              <ExternalLink size={13} />
+              {link.label}
+            </Button>
+          ))}
+        </div>
+        {userPets.length > 0 && (
+          <div className="flex max-h-40 flex-col gap-2 overflow-y-auto rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
+            {userPets.map((pet) => (
+              <div key={pet.id} className="flex items-center justify-between gap-3 rounded px-2 py-1 text-[12px]" style={{ color: "var(--app-text-primary)" }}>
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{pet.displayName}</span>
+                  <span className="block truncate" style={{ color: "var(--app-text-tertiary)" }}>{pet.id}</span>
+                </span>
+                <Button type="button" size="sm" variant="ghost" onClick={() => void deleteUserPet(pet.id)}>
+                  <Trash2 size={13} />
+                  删除
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
         <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
           支持 Codex pet 标准结构：pet.json + spritesheet.webp/png/gif；URL 安装仅允许 HTTPS zip。
         </p>

@@ -181,6 +181,15 @@ pub fn install_ccchan_pet_from_path(
 }
 
 #[tauri::command]
+pub fn delete_ccchan_user_pet(
+    service: State<'_, Arc<CCChanService>>,
+    pet_id: String,
+) -> AppResult<()> {
+    debug!(pet_id = %pet_id, "cmd::delete_ccchan_user_pet");
+    service.delete_user_pet(pet_id)
+}
+
+#[tauri::command]
 pub fn get_ccchan_settings(service: State<'_, Arc<CCChanService>>) -> AppResult<CCChanSettings> {
     debug!("cmd::get_ccchan_settings");
     Ok(service.settings())

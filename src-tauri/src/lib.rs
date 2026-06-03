@@ -12,10 +12,11 @@ pub mod services;
 pub mod utils;
 
 use ccchan_commands::{
-    get_ccchan_pets, get_ccchan_settings, hide_ccchan, install_ccchan_pet_from_path,
-    install_ccchan_pet_from_preview, move_ccchan_window, preview_ccchan_pet_from_path,
-    preview_ccchan_pet_from_url, resize_ccchan_for_chat, resize_ccchan_for_menu,
-    save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat, stop_ccchan_chat,
+    delete_ccchan_user_pet, get_ccchan_pets, get_ccchan_settings, hide_ccchan,
+    install_ccchan_pet_from_path, install_ccchan_pet_from_preview, move_ccchan_window,
+    preview_ccchan_pet_from_path, preview_ccchan_pet_from_url, resize_ccchan_for_chat,
+    resize_ccchan_for_menu, save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat,
+    stop_ccchan_chat,
 };
 use ccchan_service::{CCChanService, CcChanSessionNotifier};
 use commands::{
@@ -1539,6 +1540,7 @@ pub fn run() {
             preview_ccchan_pet_from_path,
             install_ccchan_pet_from_preview,
             install_ccchan_pet_from_path,
+            delete_ccchan_user_pet,
             get_ccchan_settings,
             save_ccchan_settings,
             // Git 命令

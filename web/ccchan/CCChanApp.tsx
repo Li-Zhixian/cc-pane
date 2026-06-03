@@ -176,8 +176,12 @@ export function CCChanApp() {
     listen<{ sessionId?: string | null }>("ccchan:active-session", (event) => {
       if (!cancelled) setActiveMainSessionId(event.payload?.sessionId ?? null);
     }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+      void emitTo("main", "ccchan:ready").catch(() => {});
     }).catch(() => {});
     return () => {
       cancelled = true;

@@ -24,7 +24,7 @@ export function ContextMenu({
 }: ContextMenuProps) {
   const items = [
     { label: "隐藏", icon: EyeOff, action: onHide },
-    { label: "切换角色", icon: Shuffle, action: onSwitchPet },
+    { label: "切换宠物", icon: Shuffle, action: onSwitchPet },
     { label: "设置", icon: Settings, action: onOpenSettings },
     { label: "退出", icon: LogOut, action: onExit },
   ];
