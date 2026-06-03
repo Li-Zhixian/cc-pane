@@ -68,13 +68,13 @@ The ccchan settings panel supports:
 
 - Folder install: selects a folder containing `pet.json`, or a parent folder with one direct child containing `pet.json`.
 - Zip install: extracts a zip with safe paths only, then installs the detected pet folder.
-- HTTPS URL install: downloads a zip into `<data-dir>/ccchan/pet-staging`, previews metadata, then installs after confirmation.
+- URL install: downloads an HTTPS zip package, or imports an official `codex://pets/install?name=&imageUrl=` link pasted into settings by downloading the HTTPS `imageUrl` into a single-frame ccchan pet package. Both paths stage into `<data-dir>/ccchan/pet-staging`, preview metadata, then install after confirmation.
 - User pet management: lists and deletes pets installed under `<data-dir>/ccchan/pets`; bundled and Codex Home pets are read-only from this UI.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
-URL installs require `https://`, cap package size at 30 MB, cap file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
+URL installs require `https://`, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
 
-Official Codex app pets also support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app deep-link flow; it reads Codex Home pets and supports package import directly.
+Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import these links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app; if direct OS deep links are added later they should use a CC-Panes-owned scheme such as `ccpanes://`.
 
 ## Runtime Status
 

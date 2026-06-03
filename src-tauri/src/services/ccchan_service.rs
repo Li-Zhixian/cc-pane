@@ -95,6 +95,17 @@ pub struct PetInstallPreview {
     pub source_path: String,
 }
 
+struct CodexPetLink {
+    name: String,
+    image_url: reqwest::Url,
+    description: String,
+}
+
+struct LimitedDownload {
+    bytes: Vec<u8>,
+    headers: reqwest::header::HeaderMap,
+}
+
 pub struct CCChanService {
     settings_service: Arc<SettingsService>,
     app_paths: Arc<AppPaths>,
@@ -176,9 +187,12 @@ impl CCChanService {
                 error
             ))
         })?;
+        if parsed.scheme() == "codex" {
+            return self.preview_pet_from_codex_deeplink(parsed).await;
+        }
         if parsed.scheme() != "https" {
             return Err(AppError::from(
-                "ccchan pet URL installs require an https:// URL",
+                "ccchan pet URL installs require an https:// zip URL or codex://pets/install link",
             ));
         }
         let path_ext = Path::new(parsed.path())
@@ -192,33 +206,47 @@ impl CCChanService {
             ));
         }
 
-        let response = reqwest::get(parsed.clone())
-            .await
-            .map_err(|error| AppError::from(format!("Failed to download pet package: {error}")))?;
-        if !response.status().is_success() {
-            return Err(AppError::from(format!(
-                "Failed to download pet package: HTTP {}",
-                response.status()
-            )));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| AppError::from(format!("Failed to read pet package: {error}")))?;
-        if bytes.len() > MAX_PET_PACKAGE_BYTES {
-            return Err(AppError::from(format!(
-                "Pet package is too large: {} bytes",
-                bytes.len()
-            )));
-        }
+        let download = download_limited_pet_url(parsed.clone(), "Pet package").await?;
 
         let staging_id = uuid::Uuid::new_v4().to_string();
         let staging_dir = self.pet_staging_dir().join(&staging_id);
         std::fs::create_dir_all(&staging_dir)?;
-        extract_pet_zip(&bytes, &staging_dir)?;
+        extract_pet_zip(&download.bytes, &staging_dir)?;
 
         let pet_root = find_pet_root(&staging_dir)?;
         let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
+        Ok(PetInstallPreview {
+            staging_id,
+            pet,
+            source_path: parsed.to_string(),
+        })
+    }
+
+    async fn preview_pet_from_codex_deeplink(
+        &self,
+        parsed: reqwest::Url,
+    ) -> AppResult<PetInstallPreview> {
+        let link = parse_codex_pet_link(&parsed)?;
+        let download = download_limited_pet_url(link.image_url.clone(), "Pet image").await?;
+        let image_ext =
+            pet_image_extension_from_download(&link.image_url, &download.headers, &download.bytes)?;
+
+        let pet_id = sanitized_pet_dir_name(&link.name)?;
+        let staging_id = uuid::Uuid::new_v4().to_string();
+        let staging_dir = self.pet_staging_dir().join(&staging_id);
+        let pet_dir = staging_dir.join(&pet_id);
+        std::fs::create_dir_all(&pet_dir)?;
+        let sprite_name = format!("spritesheet.{image_ext}");
+        std::fs::write(pet_dir.join(&sprite_name), download.bytes)?;
+        write_single_frame_pet_json(
+            &pet_dir,
+            &pet_id,
+            &link.name,
+            &link.description,
+            &sprite_name,
+        )?;
+
+        let pet = load_pet_from_dir(&pet_dir, PetSource::User)?;
         Ok(PetInstallPreview {
             staging_id,
             pet,
@@ -1002,6 +1030,176 @@ fn resolve_spritesheet_path(pet_dir: &Path, configured_path: &str) -> AppResult<
         .ok_or_else(|| AppError::from(format!("No spritesheet found in {}", pet_dir.display())))
 }
 
+fn parse_codex_pet_link(parsed: &reqwest::Url) -> AppResult<CodexPetLink> {
+    if parsed.host_str() != Some("pets") || parsed.path() != "/install" {
+        return Err(AppError::from(
+            "ccchan only supports codex://pets/install pet links",
+        ));
+    }
+    let name = codex_pet_query_value(parsed, "name")
+        .ok_or_else(|| AppError::from("codex pet install link requires name="))?;
+    let image_url = codex_pet_query_value(parsed, "imageUrl")
+        .ok_or_else(|| AppError::from("codex pet install link requires imageUrl="))?;
+    let description = codex_pet_query_value(parsed, "description")
+        .unwrap_or_else(|| format!("{name} imported from a Codex pet link"));
+
+    let image_url = reqwest::Url::parse(&image_url)
+        .map_err(|error| AppError::from(format!("Invalid codex pet imageUrl: {error}")))?;
+    if image_url.scheme() != "https" {
+        return Err(AppError::from(
+            "codex pet install imageUrl must be an https:// URL",
+        ));
+    }
+
+    Ok(CodexPetLink {
+        name,
+        image_url,
+        description,
+    })
+}
+
+fn codex_pet_query_value(parsed: &reqwest::Url, key: &str) -> Option<String> {
+    parsed
+        .query_pairs()
+        .find_map(|(item_key, value)| (item_key == key).then(|| value.into_owned()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn download_limited_pet_url(
+    url: reqwest::Url,
+    label: &'static str,
+) -> AppResult<LimitedDownload> {
+    let mut response = reqwest::get(url)
+        .await
+        .map_err(|error| AppError::from(format!("Failed to download pet asset: {error}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::from(format!(
+            "Failed to download pet asset: HTTP {}",
+            response.status()
+        )));
+    }
+    if let Some(length) = response.content_length() {
+        if length > MAX_PET_PACKAGE_BYTES as u64 {
+            return Err(AppError::from(format!(
+                "{label} is too large: {length} bytes"
+            )));
+        }
+    }
+
+    let headers = response.headers().clone();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| AppError::from(format!("Failed to read pet asset: {error}")))?
+    {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_PET_PACKAGE_BYTES {
+            return Err(AppError::from(format!(
+                "{label} is too large: {} bytes",
+                bytes.len()
+            )));
+        }
+    }
+    Ok(LimitedDownload { bytes, headers })
+}
+
+fn pet_image_extension_from_download(
+    url: &reqwest::Url,
+    headers: &reqwest::header::HeaderMap,
+    bytes: &[u8],
+) -> AppResult<&'static str> {
+    if let Some(ext) = pet_image_extension_from_magic(bytes) {
+        return Ok(ext);
+    }
+    if let Some(ext) = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(pet_image_extension_from_content_type)
+    {
+        return Ok(ext);
+    }
+    pet_image_extension_from_url(url)
+}
+
+fn pet_image_extension_from_content_type(content_type: &str) -> Option<&'static str> {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match media_type.as_str() {
+        "image/webp" => Some("webp"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        _ => None,
+    }
+}
+
+fn pet_image_extension_from_magic(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return Some("webp");
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("png");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("jpg");
+    }
+    None
+}
+
+fn pet_image_extension_from_url(url: &reqwest::Url) -> AppResult<&'static str> {
+    let ext = Path::new(url.path())
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "webp" => Ok("webp"),
+        "png" => Ok("png"),
+        "gif" => Ok("gif"),
+        "jpg" | "jpeg" => Ok("jpg"),
+        _ => Err(AppError::from(
+            "codex pet imageUrl must end with .webp, .png, .gif, .jpg, or .jpeg",
+        )),
+    }
+}
+
+fn write_single_frame_pet_json(
+    pet_dir: &Path,
+    pet_id: &str,
+    display_name: &str,
+    description: &str,
+    sprite_name: &str,
+) -> AppResult<()> {
+    let pet_json = serde_json::json!({
+        "id": pet_id,
+        "displayName": display_name,
+        "description": description,
+        "spritesheetPath": sprite_name,
+        "atlas": { "cellW": 192, "cellH": 208, "cols": 1, "rows": 1 },
+        "animations": {
+            "idle": { "row": 0, "frames": 1, "fps": 1 },
+            "working": { "row": 0, "frames": 1, "fps": 1 },
+            "waiting": { "row": 0, "frames": 1, "fps": 1 },
+            "happy": { "row": 0, "frames": 1, "fps": 1 },
+            "sad": { "row": 0, "frames": 1, "fps": 1 }
+        }
+    });
+    std::fs::write(
+        pet_dir.join("pet.json"),
+        serde_json::to_string_pretty(&pet_json)?,
+    )?;
+    Ok(())
+}
+
 fn non_empty_or(value: String, fallback: &str) -> String {
     if value.trim().is_empty() {
         fallback.to_string()
@@ -1331,6 +1529,86 @@ mod tests {
         assert!(safe_relative_pet_path("assets/spritesheet.webp").is_ok());
         assert!(safe_relative_pet_path("../spritesheet.webp").is_err());
         assert!(safe_relative_pet_path("/tmp/spritesheet.webp").is_err());
+    }
+
+    #[test]
+    fn pet_image_extension_from_url_allows_codex_pet_images() {
+        let webp = reqwest::Url::parse("https://example.invalid/pet.webp").expect("url");
+        let jpeg = reqwest::Url::parse("https://example.invalid/pet.jpeg").expect("url");
+        let svg = reqwest::Url::parse("https://example.invalid/pet.svg").expect("url");
+
+        assert_eq!(pet_image_extension_from_url(&webp).expect("webp"), "webp");
+        assert_eq!(pet_image_extension_from_url(&jpeg).expect("jpeg"), "jpg");
+        assert!(pet_image_extension_from_url(&svg).is_err());
+    }
+
+    #[test]
+    fn parse_codex_pet_link_requires_https_image_url() {
+        let link = reqwest::Url::parse(
+            "codex://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp&description=Hi",
+        )
+        .expect("url");
+        let parsed = parse_codex_pet_link(&link).expect("parse link");
+
+        assert_eq!(parsed.name, "Doro");
+        assert_eq!(
+            parsed.image_url.as_str(),
+            "https://example.invalid/doro.webp"
+        );
+        assert_eq!(parsed.description, "Hi");
+
+        let insecure = reqwest::Url::parse(
+            "codex://pets/install?name=Doro&imageUrl=http://example.invalid/doro.webp",
+        )
+        .expect("url");
+        assert!(parse_codex_pet_link(&insecure)
+            .expect_err("http imageUrl rejected")
+            .to_string()
+            .contains("https"));
+    }
+
+    #[test]
+    fn pet_image_extension_from_download_prefers_mime_and_magic_before_url() {
+        let no_ext = reqwest::Url::parse("https://example.invalid/pet").expect("url");
+        let svg = reqwest::Url::parse("https://example.invalid/pet.svg").expect("url");
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("image/png; charset=binary"),
+        );
+
+        assert_eq!(
+            pet_image_extension_from_download(&no_ext, &headers, b"").expect("mime"),
+            "png"
+        );
+        headers.clear();
+        assert_eq!(
+            pet_image_extension_from_download(&svg, &headers, b"RIFFxxxxWEBP").expect("magic"),
+            "webp"
+        );
+    }
+
+    #[test]
+    fn write_single_frame_pet_json_creates_loadable_pet() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("pet");
+        std::fs::create_dir_all(&pet_dir).expect("create pet dir");
+        std::fs::write(pet_dir.join("spritesheet.png"), [1_u8, 2, 3]).expect("write sprite");
+
+        write_single_frame_pet_json(
+            &pet_dir,
+            "pet-id",
+            "Pet Name",
+            "Pet description",
+            "spritesheet.png",
+        )
+        .expect("write json");
+        let pet = load_pet_from_dir(&pet_dir, PetSource::User).expect("load pet");
+
+        assert_eq!(pet.id, "pet-id");
+        assert_eq!(pet.display_name, "Pet Name");
+        assert_eq!(pet.atlas.cols, 1);
+        assert_eq!(pet.animations["idle"].frames, 1);
     }
 
     #[test]
