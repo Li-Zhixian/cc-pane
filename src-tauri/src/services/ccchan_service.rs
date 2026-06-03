@@ -20,6 +20,7 @@ use tracing::{debug, warn};
 
 const CCCHAN_WINDOW_LABEL: &str = "ccchan";
 const CCCHAN_EVENT: &str = "ccchan-event";
+const CCCHAN_SETTINGS_UPDATED_EVENT: &str = "ccchan:settings-updated";
 const CCCHAN_HELPER_PROMPT: &str =
     include_str!("../../resources/claude-bundle/default-skills/ccchan-helper.md");
 const MAX_PET_PACKAGE_BYTES: usize = 30 * 1024 * 1024;
@@ -133,38 +134,52 @@ impl CCChanService {
         self.settings_service.get_settings().ccchan
     }
 
+    pub fn emit_settings_updated(&self) {
+        let app_handle = self
+            .app_handle
+            .lock()
+            .ok()
+            .and_then(|handle| handle.clone());
+        let Some(app) = app_handle else {
+            debug!("ccchan settings update skipped before app handle is set");
+            return;
+        };
+        if let Err(error) = app.emit(CCCHAN_SETTINGS_UPDATED_EVENT, serde_json::json!({})) {
+            warn!(error = %error, "failed to emit ccchan settings update");
+        }
+    }
+
     pub fn save_settings(&self, settings: CCChanSettings) -> AppResult<()> {
         let mut app_settings = self.settings_service.get_settings();
         app_settings.ccchan = settings;
         self.settings_service.update_settings(app_settings)?;
+        self.emit_settings_updated();
         Ok(())
     }
 
     pub fn show_window(&self, app: &AppHandle) -> AppResult<()> {
-        let window = ccchan_window(app)?;
-        window
-            .set_size(LogicalSize::new(120.0, 120.0))
-            .map_err(|error| AppError::from(error.to_string()))?;
-        window
-            .set_decorations(false)
-            .map_err(|error| AppError::from(error.to_string()))?;
-        window
-            .set_always_on_top(true)
-            .map_err(|error| AppError::from(error.to_string()))?;
-        position_window(&window, &self.settings())?;
-        window
-            .show()
-            .map_err(|error| AppError::from(error.to_string()))?;
+        self.show_window_inner(app)?;
         self.set_window_visible(true)?;
         Ok(())
     }
 
     pub fn hide_window(&self, app: &AppHandle) -> AppResult<()> {
-        let window = ccchan_window(app)?;
-        window
-            .hide()
-            .map_err(|error| AppError::from(error.to_string()))?;
+        self.hide_window_inner(app)?;
         self.set_window_visible(false)?;
+        Ok(())
+    }
+
+    pub fn sync_saved_window_visibility(
+        &self,
+        app: &AppHandle,
+        was_visible: bool,
+        settings: &CCChanSettings,
+    ) -> AppResult<()> {
+        match (was_visible, settings.window_visible) {
+            (false, true) => self.show_window_with_settings(app, settings)?,
+            (true, false) => self.hide_window_inner(app)?,
+            _ => {}
+        }
         Ok(())
     }
 
@@ -308,6 +323,7 @@ impl CCChanService {
                 "failed to remove ccchan pet staging directory after install"
             );
         }
+        self.emit_settings_updated();
         Ok(pet)
     }
 
@@ -340,7 +356,9 @@ impl CCChanService {
         } else {
             find_pet_root(&source)?
         };
-        self.install_pet_dir(&pet_root)
+        let pet = self.install_pet_dir(&pet_root)?;
+        self.emit_settings_updated();
+        Ok(pet)
     }
 
     pub fn delete_user_pet(&self, pet_id: String) -> AppResult<()> {
@@ -366,7 +384,9 @@ impl CCChanService {
                 pet_dir.display(),
                 error
             ))
-        })
+        })?;
+        self.emit_settings_updated();
+        Ok(())
     }
 
     pub fn start_chat(
@@ -465,6 +485,39 @@ impl CCChanService {
         let mut settings = self.settings();
         settings.window_visible = visible;
         self.save_settings(settings)
+    }
+
+    fn show_window_inner(&self, app: &AppHandle) -> AppResult<()> {
+        let settings = self.settings();
+        self.show_window_with_settings(app, &settings)
+    }
+
+    fn show_window_with_settings(
+        &self,
+        app: &AppHandle,
+        settings: &CCChanSettings,
+    ) -> AppResult<()> {
+        let window = ccchan_window(app)?;
+        window
+            .set_size(LogicalSize::new(120.0, 120.0))
+            .map_err(|error| AppError::from(error.to_string()))?;
+        window
+            .set_decorations(false)
+            .map_err(|error| AppError::from(error.to_string()))?;
+        window
+            .set_always_on_top(true)
+            .map_err(|error| AppError::from(error.to_string()))?;
+        position_window(&window, settings)?;
+        window
+            .show()
+            .map_err(|error| AppError::from(error.to_string()))
+    }
+
+    fn hide_window_inner(&self, app: &AppHandle) -> AppResult<()> {
+        let window = ccchan_window(app)?;
+        window
+            .hide()
+            .map_err(|error| AppError::from(error.to_string()))
     }
 
     fn discover_pets(&self, app: &AppHandle) -> AppResult<Vec<PetMeta>> {

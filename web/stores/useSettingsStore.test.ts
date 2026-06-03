@@ -98,6 +98,28 @@ describe("useSettingsStore", () => {
     });
   });
 
+  describe("patchCCChanSettings", () => {
+    it("应只更新本地 settings 中的 ccchan", () => {
+      const settings = createTestSettings();
+      useSettingsStore.setState({
+        settings: { ...settings, ccchan: DEFAULT_CCCHAN_SETTINGS },
+      });
+
+      useSettingsStore.getState().patchCCChanSettings({
+        ...DEFAULT_CCCHAN_SETTINGS,
+        roles: [
+          {
+            ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+            aiEngine: "codex",
+          },
+        ],
+      });
+
+      expect(useSettingsStore.getState().settings?.ccchan?.aiEngine).toBe("codex");
+      expect(settingsService.updateSettings).not.toHaveBeenCalled();
+    });
+  });
+
   describe("getDefaults", () => {
     it("应返回完整默认设置", () => {
       const defaults = useSettingsStore.getState().getDefaults();

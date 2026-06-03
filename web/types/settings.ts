@@ -8,6 +8,7 @@ export interface AppSettings {
   notification: NotificationSettings;
   screenshot: ScreenshotSettings;
   voice: VoiceSettings;
+  ccchan?: import("@/ccchan/types").CCChanSettings;
 }
 
 /** 代理设置 */

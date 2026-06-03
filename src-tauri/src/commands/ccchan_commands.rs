@@ -207,9 +207,13 @@ pub fn get_ccchan_settings(service: State<'_, Arc<CCChanService>>) -> AppResult<
 
 #[tauri::command]
 pub fn save_ccchan_settings(
+    app: AppHandle,
     service: State<'_, Arc<CCChanService>>,
     settings: CCChanSettings,
 ) -> AppResult<()> {
     debug!("cmd::save_ccchan_settings");
-    service.save_settings(settings)
+    let was_visible = service.settings().window_visible;
+    service.sync_saved_window_visibility(&app, was_visible, &settings)?;
+    service.save_settings(settings)?;
+    Ok(())
 }

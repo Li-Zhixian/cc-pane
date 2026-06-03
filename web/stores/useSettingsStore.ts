@@ -18,6 +18,7 @@ interface SettingsState {
   loading: boolean;
   loadSettings: () => Promise<void>;
   saveSettings: (newSettings: AppSettings) => Promise<void>;
+  patchCCChanSettings: (ccchan: CCChanSettings) => void;
   getDefaults: () => AppSettings;
 }
 
@@ -56,6 +57,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       handleErrorSilent(e, "save settings");
       throw e;
     }
+  },
+
+  patchCCChanSettings: (ccchan) => {
+    const normalized = normalizeCCChanSettings(ccchan);
+    set((state) => {
+      if (!state.settings) return state;
+      return { settings: { ...state.settings, ccchan: normalized } };
+    });
   },
 
   getDefaults: () => withCCChanSettings({

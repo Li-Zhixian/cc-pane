@@ -1,3 +1,4 @@
+use crate::ccchan_service::CCChanService;
 use crate::models::settings::AppSettings;
 use crate::models::Workspace;
 use crate::services::SettingsService;
@@ -8,7 +9,7 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tracing::{debug, info};
 
 /// 获取设置
@@ -20,11 +21,22 @@ pub fn get_settings(service: State<'_, Arc<SettingsService>>) -> AppResult<AppSe
 /// 更新设置
 #[tauri::command]
 pub fn update_settings(
+    app: AppHandle,
     service: State<'_, Arc<SettingsService>>,
     settings: AppSettings,
 ) -> AppResult<()> {
     debug!("cmd::update_settings");
-    Ok(service.update_settings(settings)?)
+    let previous_ccchan = service.get_settings().ccchan;
+    let next_ccchan = settings.ccchan.clone();
+
+    if let Some(ccchan) = app.try_state::<Arc<CCChanService>>() {
+        ccchan.sync_saved_window_visibility(&app, previous_ccchan.window_visible, &next_ccchan)?;
+        service.update_settings(settings)?;
+        ccchan.emit_settings_updated();
+    } else {
+        service.update_settings(settings)?;
+    }
+    Ok(())
 }
 
 /// 测试代理连接

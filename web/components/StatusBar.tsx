@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Pin, Minimize2, Sun, Moon, Terminal, ArrowUpCircle, Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -43,6 +44,30 @@ export default function StatusBar() {
 
   useEffect(() => {
     void loadCCChan();
+  }, [loadCCChan]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    const refreshCCChan = async () => {
+      await loadCCChan();
+      if (cancelled) return;
+      useSettingsStore.getState().patchCCChanSettings(useCCChanStore.getState().settings);
+    };
+    listen("ccchan:settings-updated", () => {
+      if (!cancelled) void refreshCCChan();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [loadCCChan]);
 
   const handleUpdate = async () => {

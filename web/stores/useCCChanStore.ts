@@ -188,6 +188,9 @@ function normalizePets(pets: PetMeta[] | null | undefined): PetMeta[] {
   return pets && pets.length > 0 ? pets : [FALLBACK_PET];
 }
 
+let loadPromise: Promise<void> | null = null;
+let reloadRequested = false;
+
 export const useCCChanStore = create<CCChanStoreState>((set, get) => ({
   settings: DEFAULT_CCCHAN_SETTINGS,
   pets: [FALLBACK_PET],
@@ -197,21 +200,32 @@ export const useCCChanStore = create<CCChanStoreState>((set, get) => ({
   loaded: false,
 
   load: async () => {
-    if (get().loading) return;
-    set({ loading: true });
-    try {
-      const [settings, pets] = await Promise.all([
-        invoke<CCChanSettings>("get_ccchan_settings").catch(() => DEFAULT_CCCHAN_SETTINGS),
-        invoke<PetMeta[]>("get_ccchan_pets").catch(() => [FALLBACK_PET]),
-      ]);
-      set({
-        settings: normalizeCCChanSettings(settings),
-        pets: normalizePets(pets),
-        loaded: true,
-      });
-    } finally {
-      set({ loading: false });
+    if (loadPromise) {
+      reloadRequested = true;
+      await loadPromise;
+      return;
     }
+    loadPromise = (async () => {
+      set({ loading: true });
+      try {
+        do {
+          reloadRequested = false;
+          const [settings, pets] = await Promise.all([
+            invoke<CCChanSettings>("get_ccchan_settings").catch(() => DEFAULT_CCCHAN_SETTINGS),
+            invoke<PetMeta[]>("get_ccchan_pets").catch(() => [FALLBACK_PET]),
+          ]);
+          set({
+            settings: normalizeCCChanSettings(settings),
+            pets: normalizePets(pets),
+            loaded: true,
+          });
+        } while (reloadRequested);
+      } finally {
+        set({ loading: false });
+        loadPromise = null;
+      }
+    })();
+    await loadPromise;
   },
 
   saveSettings: async (settings) => {

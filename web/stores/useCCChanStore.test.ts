@@ -127,4 +127,38 @@ describe("useCCChanStore", () => {
     expect(useCCChanStore.getState().pets).toEqual([doroPet]);
     expect(useCCChanStore.getState().settings.activeRoleId).toBe("default");
   });
+
+  it("runs a follow-up load when an update arrives during loading", async () => {
+    let resolveFirstSettings: (settings: CCChanSettings) => void = () => {};
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") {
+        if (vi.mocked(invoke).mock.calls.filter(([name]) => name === "get_ccchan_settings").length === 1) {
+          return new Promise((resolve) => {
+            resolveFirstSettings = resolve as (settings: CCChanSettings) => void;
+          });
+        }
+        return Promise.resolve({
+          ...DEFAULT_CCCHAN_SETTINGS,
+          roles: [
+            {
+              ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+              aiEngine: "codex",
+            },
+          ],
+        });
+      }
+      if (cmd === "get_ccchan_pets") {
+        return Promise.resolve([doroPet]);
+      }
+      return Promise.reject(new Error(`Unhandled command: ${cmd}`));
+    });
+
+    const firstLoad = useCCChanStore.getState().load();
+    const secondLoad = useCCChanStore.getState().load();
+    resolveFirstSettings(DEFAULT_CCCHAN_SETTINGS);
+    await Promise.all([firstLoad, secondLoad]);
+
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "get_ccchan_settings")).toHaveLength(2);
+    expect(useCCChanStore.getState().settings.aiEngine).toBe("codex");
+  });
 });

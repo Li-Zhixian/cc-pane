@@ -94,12 +94,12 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     });
     if (typeof selected !== "string") return;
     try {
+      const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_path", { path: selected });
+      const confirmed = window.confirm(`安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`);
+      if (!confirmed) return;
       if (directory) {
         await invoke("install_ccchan_pet_from_path", { path: selected });
       } else {
-        const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_path", { path: selected });
-        const confirmed = window.confirm(`安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`);
-        if (!confirmed) return;
         await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
       }
       await load();
@@ -158,6 +158,15 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       await openUrl(url);
     } catch (error) {
       toast.error(`打开链接失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function refreshPets() {
+    try {
+      await load();
+      toast.success("宠物列表已刷新");
+    } catch (error) {
+      toast.error(`刷新失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -397,6 +406,9 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           <Button type="button" size="sm" variant="secondary" onClick={() => void installFromUrl()}>
             <Download size={14} />
             URL 安装
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => void refreshPets()}>
+            刷新列表
           </Button>
           <Button
             type="button"

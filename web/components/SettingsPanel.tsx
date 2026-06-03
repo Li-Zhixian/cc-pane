@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Settings, Globe, Terminal, Keyboard, Info, Cloud, Bell, Camera, Share2, Mic, Bot } from "lucide-react";
@@ -49,6 +49,8 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
 
   const [draft, setDraft] = useState<SettingsDraft>(() => withCCChanDraft(getDefaults()));
   const [activeSection, setActiveSection] = useState("general");
+  const draftInitializedRef = useRef(false);
+  const ccchanDirtyRef = useRef(false);
 
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const sections = [
@@ -68,7 +70,13 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
   // 打开时同步设置
   useEffect(() => {
     if (open && settings) {
+      if (draftInitializedRef.current) return;
       setDraft(withCCChanDraft(JSON.parse(JSON.stringify(settings))));
+      draftInitializedRef.current = true;
+    }
+    if (!open) {
+      draftInitializedRef.current = false;
+      ccchanDirtyRef.current = false;
     }
   }, [open, settings]);
 
@@ -80,8 +88,13 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
 
   async function handleSave() {
     try {
-      await useCCChanStore.getState().saveSettings(draft.ccchan);
-      await saveSettings(draft);
+      const ccchanStore = useCCChanStore.getState();
+      const ccchanSource = !ccchanDirtyRef.current && ccchanStore.loaded
+        ? ccchanStore.settings
+        : draft.ccchan;
+      const ccchan = normalizeCCChanSettings(ccchanSource);
+      const nextDraft = { ...draft, ccchan };
+      await saveSettings(nextDraft);
       toast.success(t("saved"));
       onOpenChange(false);
     } catch (e) {
@@ -143,7 +156,13 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
               <VoiceSection value={draft.voice} onChange={(v) => setDraft({ ...draft, voice: v })} />
             )}
             {activeSection === "ccchan" && (
-              <CCChanSettings value={draft.ccchan} onChange={(v) => setDraft({ ...draft, ccchan: v })} />
+              <CCChanSettings
+                value={draft.ccchan}
+                onChange={(v) => {
+                  ccchanDirtyRef.current = true;
+                  setDraft({ ...draft, ccchan: v });
+                }}
+              />
             )}
             {activeSection === "shortcuts" && (
               <ShortcutsSection value={draft.shortcuts} onChange={(v) => setDraft({ ...draft, shortcuts: v })} />

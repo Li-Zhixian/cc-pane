@@ -208,6 +208,25 @@ export function CCChanApp() {
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    listen("ccchan:settings-updated", () => {
+      if (!cancelled) void loadCCChan();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [loadCCChan]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     listen<CCChanEvent>("ccchan-event", (event) => {
