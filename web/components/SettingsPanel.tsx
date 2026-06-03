@@ -22,7 +22,7 @@ import ScreenshotSection from "./settings/ScreenshotSection";
 import SharedMcpSection from "./settings/SharedMcpSection";
 import VoiceSection from "./settings/VoiceSection";
 import CCChanSettings from "./settings/CCChanSettings";
-import { normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
+import { getCCChanRuntimeValidationError, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
 import type { CCChanSettings as CCChanSettingsValue } from "@/ccchan/types";
 
 interface SettingsPanelProps {
@@ -93,6 +93,12 @@ export default function SettingsPanel({ open, onOpenChange }: SettingsPanelProps
         ? ccchanStore.settings
         : draft.ccchan;
       const ccchan = normalizeCCChanSettings(ccchanSource);
+      const ccchanError = getCCChanRuntimeValidationError(ccchan);
+      if (ccchanError) {
+        setActiveSection("ccchan");
+        toast.error(ccchanError);
+        return;
+      }
       const nextDraft = { ...draft, ccchan };
       await saveSettings(nextDraft);
       toast.success(t("saved"));

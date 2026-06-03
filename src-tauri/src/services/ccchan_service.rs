@@ -595,13 +595,13 @@ impl CCChanService {
         if settings.pet_sources.builtin {
             let root = resolve_ccchan_root(app)?;
             for pet in load_manifest_pets(&root, PetSource::Builtin)? {
-                pets.insert(pet.id.clone(), pet);
+                merge_pet_by_source_rank(&mut pets, pet);
             }
         }
 
         if settings.pet_sources.user {
             for pet in self.load_pet_dir_children(&self.user_pets_dir(), PetSource::User)? {
-                pets.insert(pet.id.clone(), pet);
+                merge_pet_by_source_rank(&mut pets, pet);
             }
         }
 
@@ -609,7 +609,7 @@ impl CCChanService {
             match self.load_pet_dir_children(Path::new(dir), PetSource::Custom) {
                 Ok(custom_pets) => {
                     for pet in custom_pets {
-                        pets.entry(pet.id.clone()).or_insert(pet);
+                        merge_pet_by_source_rank(&mut pets, pet);
                     }
                 }
                 Err(error) => {
@@ -625,7 +625,7 @@ impl CCChanService {
         if settings.pet_sources.codex_home {
             if let Some(codex_pets_dir) = codex_home_pets_dir() {
                 for pet in self.load_pet_dir_children(&codex_pets_dir, PetSource::CodexHome)? {
-                    pets.entry(pet.id.clone()).or_insert(pet);
+                    merge_pet_by_source_rank(&mut pets, pet);
                 }
             }
         }
@@ -924,6 +924,11 @@ fn build_ccchan_wsl_launch(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| AppError::from("ccchan WSL chat requires a WSL remote path"))?;
+            if !remote_path.starts_with('/') && !remote_path.starts_with('~') {
+                return Err(AppError::from(format!(
+                    "ccchan WSL chat remote path must start with / or ~: {remote_path}"
+                )));
+            }
             Ok(Some(WslLaunchInfo {
                 remote_path: remote_path.to_string(),
                 workspace_remote_path: None,
@@ -1101,6 +1106,15 @@ fn source_rank(source: PetSource) -> u8 {
         PetSource::Builtin => 1,
         PetSource::Custom => 2,
         PetSource::CodexHome => 3,
+    }
+}
+
+fn merge_pet_by_source_rank(pets: &mut HashMap<String, PetMeta>, pet: PetMeta) {
+    let should_insert = pets
+        .get(&pet.id)
+        .is_none_or(|existing| source_rank(pet.source) < source_rank(existing.source));
+    if should_insert {
+        pets.insert(pet.id.clone(), pet);
     }
 }
 
@@ -1588,6 +1602,18 @@ mod tests {
         std::fs::write(dir.join("spritesheet.webp"), [1_u8, 2, 3]).expect("write sprite");
     }
 
+    fn pet_meta(id: &str, display_name: &str, source: PetSource) -> PetMeta {
+        PetMeta {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            description: "test pet".to_string(),
+            spritesheet_url: "asset://pet".to_string(),
+            source,
+            atlas: PetAtlas::default(),
+            animations: default_pet_animations(),
+        }
+    }
+
     fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(cursor);
@@ -1795,6 +1821,37 @@ mod tests {
     }
 
     #[test]
+    fn merge_pet_by_source_rank_prefers_user_then_builtin_then_custom_then_codex_home() {
+        let mut pets = HashMap::new();
+
+        merge_pet_by_source_rank(
+            &mut pets,
+            pet_meta("same", "Codex Home", PetSource::CodexHome),
+        );
+        merge_pet_by_source_rank(&mut pets, pet_meta("same", "Custom", PetSource::Custom));
+        merge_pet_by_source_rank(&mut pets, pet_meta("same", "Builtin", PetSource::Builtin));
+        merge_pet_by_source_rank(&mut pets, pet_meta("same", "User", PetSource::User));
+        merge_pet_by_source_rank(
+            &mut pets,
+            pet_meta("same", "Another Custom", PetSource::Custom),
+        );
+
+        let pet = pets.get("same").expect("merged pet");
+        assert_eq!(pet.display_name, "User");
+        assert_eq!(pet.source, PetSource::User);
+    }
+
+    #[test]
+    fn merge_pet_by_source_rank_keeps_first_pet_for_same_source_rank() {
+        let mut pets = HashMap::new();
+
+        merge_pet_by_source_rank(&mut pets, pet_meta("same", "First", PetSource::Custom));
+        merge_pet_by_source_rank(&mut pets, pet_meta("same", "Second", PetSource::Custom));
+
+        assert_eq!(pets["same"].display_name, "First");
+    }
+
+    #[test]
     fn write_single_frame_pet_json_creates_loadable_pet() {
         let temp = tempdir().expect("tempdir");
         let pet_dir = temp.path().join("pet");
@@ -1860,6 +1917,27 @@ mod tests {
     }
 
     #[test]
+    fn build_ccchan_wsl_launch_rejects_non_linux_remote_paths() {
+        let windows_path =
+            build_ccchan_wsl_launch("wsl", Some("D:\\my-project\\cc-pane".to_string()), None)
+                .expect_err("Windows path rejected");
+        assert!(windows_path.to_string().contains("must start with / or ~"));
+
+        let unc_path = build_ccchan_wsl_launch(
+            "wsl",
+            Some("\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\repo".to_string()),
+            None,
+        )
+        .expect_err("UNC path rejected");
+        assert!(unc_path.to_string().contains("must start with / or ~"));
+
+        let relative_path =
+            build_ccchan_wsl_launch("wsl", Some("workspace/repo".to_string()), None)
+                .expect_err("relative path rejected");
+        assert!(relative_path.to_string().contains("must start with / or ~"));
+    }
+
+    #[test]
     fn build_ccchan_wsl_launch_trims_values() {
         let launch = build_ccchan_wsl_launch(
             "wsl",
@@ -1871,5 +1949,10 @@ mod tests {
 
         assert_eq!(launch.remote_path, "/home/dev/repo");
         assert_eq!(launch.distro.as_deref(), Some("Ubuntu"));
+
+        let home = build_ccchan_wsl_launch("wsl", Some("~/repo".to_string()), None)
+            .expect("build wsl")
+            .expect("wsl launch");
+        assert_eq!(home.remote_path, "~/repo");
     }
 }

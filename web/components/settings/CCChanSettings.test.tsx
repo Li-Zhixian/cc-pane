@@ -1,0 +1,151 @@
+import "@/i18n";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import CCChanSettings from "./CCChanSettings";
+import { DEFAULT_CCCHAN_SETTINGS, useCCChanStore } from "@/stores/useCCChanStore";
+import type { AwesomeCodexPetEntry, CCChanSettings as CCChanSettingsValue, PetMeta } from "@/ccchan/types";
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
+const doroPet: PetMeta = {
+  id: "doro.codex-pet",
+  displayName: "Doro",
+  description: "Doro pet",
+  spritesheetUrl: "asset://doro",
+  source: "builtin",
+  atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
+  animations: { idle: { row: 0, frames: 1, fps: 1 } },
+};
+
+const awesomePet: AwesomeCodexPetEntry = {
+  slug: "firefly--lingxiaotian",
+  name: "Firefly",
+  author: "Lingxiaotian",
+  authorHandle: "legeling",
+  authorUrl: "https://github.com/legeling",
+  primaryCategory: "Anime Characters",
+  license: "CC BY-NC 4.0",
+  description: "A soft white, mint, and gold palette pet.",
+};
+
+function renderSettings(
+  value: CCChanSettingsValue = DEFAULT_CCCHAN_SETTINGS,
+  onChange = vi.fn(),
+) {
+  render(<CCChanSettings value={value} onChange={onChange} />);
+  return { onChange };
+}
+
+async function waitForInitialLoad() {
+  await waitFor(() => {
+    expect(invoke).toHaveBeenCalledWith("get_ccchan_settings");
+    expect(invoke).toHaveBeenCalledWith("get_ccchan_pets");
+  });
+}
+
+describe("CCChanSettings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCCChanStore.setState({
+      settings: DEFAULT_CCCHAN_SETTINGS,
+      pets: [doroPet],
+      expanded: false,
+      chatSessionId: null,
+      loading: false,
+      loaded: true,
+    });
+    vi.mocked(invoke).mockImplementation((cmd, args) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "list_ccchan_awesome_codex_pets") return Promise.resolve([awesomePet]);
+      if (cmd === "preview_ccchan_awesome_codex_pet") {
+        expect(args).toEqual({ slug: "firefly--lingxiaotian" });
+        return Promise.resolve({
+          stagingId: "stage-1",
+          sourcePath: "https://raw.githubusercontent.com/legeling/awesome-codex-pet/main/pets/firefly--lingxiaotian/pet.json",
+          pet: {
+            ...doroPet,
+            id: "firefly--lingxiaotian",
+            displayName: "Firefly",
+            source: "user",
+          },
+        });
+      }
+      if (cmd === "install_ccchan_pet_from_preview") {
+        expect(args).toEqual({ stagingId: "stage-1" });
+        return Promise.resolve(undefined);
+      }
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+  });
+
+  it("adds a Codex WSL role from the quick templates and warns when remote path is missing", async () => {
+    const { onChange } = renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "Codex WSL" }));
+
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    expect(next.activeRoleId).toMatch(/^codex-wsl-/);
+    expect(next.roles.find((role) => role.id === next.activeRoleId)).toEqual(expect.objectContaining({
+      aiEngine: "codex",
+      runtimeKind: "wsl",
+      wslRemotePath: null,
+    }));
+
+    renderSettings(next);
+    await waitForInitialLoad();
+    expect(screen.getByText(/WSL 角色需要填写远端路径/)).toBeInTheDocument();
+  });
+
+  it("updates WSL remote path for the active role", async () => {
+    const wslRole = {
+      ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+      id: "codex-wsl",
+      name: "Codex WSL 助手",
+      aiEngine: "codex" as const,
+      runtimeKind: "wsl" as const,
+      wslRemotePath: null,
+    };
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: wslRole.id,
+      roles: [...DEFAULT_CCCHAN_SETTINGS.roles, wslRole],
+    };
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    fireEvent.change(screen.getByPlaceholderText("/mnt/d/my-project/cc-pane"), {
+      target: { value: "/mnt/d/my-project/cc-pane" },
+    });
+
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    expect(next.roles.find((role) => role.id === wslRole.id)?.wslRemotePath).toBe("/mnt/d/my-project/cc-pane");
+  });
+
+  it("loads, searches, and installs an Awesome Codex Pet catalog entry", async () => {
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "载入目录" }));
+    expect(await screen.findByText("Firefly")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("搜索名称、作者、分类或 license"), {
+      target: { value: "ling" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "安装" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_awesome_codex_pet", { slug: "firefly--lingxiaotian" });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+});

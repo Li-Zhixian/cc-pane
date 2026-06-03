@@ -241,6 +241,7 @@ pub fn save_ccchan_settings(
     settings: CCChanSettings,
 ) -> AppResult<()> {
     debug!("cmd::save_ccchan_settings");
+    settings.validate_chat_runtimes().map_err(AppError::from)?;
     let was_visible = service.settings().window_visible;
     service.sync_saved_window_visibility(&app, was_visible, &settings)?;
     service.save_settings(settings)?;

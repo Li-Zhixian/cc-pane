@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_CCCHAN_SETTINGS,
+  getCCChanRuntimeValidationError,
   normalizeCCChanSettings,
   useCCChanStore,
 } from "./useCCChanStore";
@@ -101,6 +102,60 @@ describe("useCCChanStore", () => {
     expect(settings.defaultPetId).toBe("doro.codex-pet");
     expect(settings.aiEngine).toBe("codex");
     expect(settings.roles.find((role) => role.id === "reviewer")?.runtimeKind).toBe("wsl");
+  });
+
+  it("validates WSL role runtime paths before settings are saved", () => {
+    const wslRole: CCChanRolePreset = {
+      id: "codex-wsl",
+      name: "Codex WSL",
+      aiEngine: "codex",
+      petId: "doro.codex-pet",
+      systemPrompt: "Use Codex in WSL.",
+      runtimeKind: "wsl",
+      wslRemotePath: null,
+      wslDistro: null,
+    };
+    const settings = normalizeCCChanSettings({
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: wslRole.id,
+      roles: [...DEFAULT_CCCHAN_SETTINGS.roles, wslRole],
+    });
+
+    expect(getCCChanRuntimeValidationError(settings)).toContain("需要填写 WSL 远端路径");
+
+    const windowsPath = normalizeCCChanSettings({
+      ...settings,
+      roles: settings.roles.map((role) =>
+        role.id === wslRole.id ? { ...role, wslRemotePath: "D:\\my-project\\cc-pane" } : role,
+      ),
+    });
+    expect(getCCChanRuntimeValidationError(windowsPath)).toContain("必须以 / 或 ~ 开头");
+
+    const uncPath = normalizeCCChanSettings({
+      ...settings,
+      roles: settings.roles.map((role) =>
+        role.id === wslRole.id
+          ? { ...role, wslRemotePath: "\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\repo" }
+          : role,
+      ),
+    });
+    expect(getCCChanRuntimeValidationError(uncPath)).toContain("必须以 / 或 ~ 开头");
+
+    const relativePath = normalizeCCChanSettings({
+      ...settings,
+      roles: settings.roles.map((role) =>
+        role.id === wslRole.id ? { ...role, wslRemotePath: "workspace/repo" } : role,
+      ),
+    });
+    expect(getCCChanRuntimeValidationError(relativePath)).toContain("必须以 / 或 ~ 开头");
+
+    const linuxPath = normalizeCCChanSettings({
+      ...settings,
+      roles: settings.roles.map((role) =>
+        role.id === wslRole.id ? { ...role, wslRemotePath: "/mnt/d/my-project/cc-pane" } : role,
+      ),
+    });
+    expect(getCCChanRuntimeValidationError(linuxPath)).toBeNull();
   });
 
   it("loads settings and pets through Tauri commands", async () => {

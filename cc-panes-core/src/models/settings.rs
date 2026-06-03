@@ -351,6 +351,31 @@ impl CCChanSettings {
         }
         self.custom_pet_dirs = normalize_ccchan_custom_pet_dirs(&self.custom_pet_dirs);
     }
+
+    pub fn validate_chat_runtimes(&self) -> Result<(), String> {
+        for role in &self.roles {
+            if role.runtime_kind != "wsl" {
+                continue;
+            }
+            let label = if role.name.trim().is_empty() {
+                role.id.as_str()
+            } else {
+                role.name.as_str()
+            };
+            let remote_path = role
+                .wsl_remote_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| format!("ccchan WSL role '{label}' requires a WSL remote path"))?;
+            if !remote_path.starts_with('/') && !remote_path.starts_with('~') {
+                return Err(format!(
+                    "ccchan WSL role '{label}' remote path must start with / or ~: {remote_path}"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn default_ccchan_ai_engine() -> String {
@@ -901,5 +926,63 @@ mod tests {
                 "\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\.codex\\pets".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn ccchan_validate_chat_runtimes_rejects_missing_wsl_remote_path() {
+        let mut settings = CCChanSettings {
+            roles: vec![
+                default_ccchan_role("claude", "homie"),
+                CCChanRolePreset {
+                    id: "codex-wsl".to_string(),
+                    name: "Codex WSL".to_string(),
+                    ai_engine: "codex".to_string(),
+                    pet_id: "doro.codex-pet".to_string(),
+                    system_prompt: default_ccchan_role_prompt(),
+                    runtime_kind: "wsl".to_string(),
+                    wsl_remote_path: Some(" ".to_string()),
+                    wsl_distro: None,
+                },
+            ],
+            ..CCChanSettings::default()
+        };
+        settings.merge_missing_defaults();
+
+        let error = settings
+            .validate_chat_runtimes()
+            .expect_err("missing WSL path should be rejected");
+
+        assert!(error.contains("requires a WSL remote path"));
+    }
+
+    #[test]
+    fn ccchan_validate_chat_runtimes_requires_linux_style_wsl_path() {
+        let mut settings = CCChanSettings {
+            roles: vec![
+                default_ccchan_role("claude", "homie"),
+                CCChanRolePreset {
+                    id: "codex-wsl".to_string(),
+                    name: "Codex WSL".to_string(),
+                    ai_engine: "codex".to_string(),
+                    pet_id: "doro.codex-pet".to_string(),
+                    system_prompt: default_ccchan_role_prompt(),
+                    runtime_kind: "wsl".to_string(),
+                    wsl_remote_path: Some("D:\\my-project\\cc-pane".to_string()),
+                    wsl_distro: None,
+                },
+            ],
+            ..CCChanSettings::default()
+        };
+        settings.merge_missing_defaults();
+
+        let error = settings
+            .validate_chat_runtimes()
+            .expect_err("Windows path should be rejected for WSL role");
+
+        assert!(error.contains("must start with / or ~"));
+
+        let mut valid = settings.clone();
+        valid.roles[1].wsl_remote_path = Some("~/cc-pane".to_string());
+        valid.validate_chat_runtimes().expect("home path allowed");
     }
 }

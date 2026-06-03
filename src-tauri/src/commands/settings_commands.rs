@@ -28,6 +28,7 @@ pub fn update_settings(
     debug!("cmd::update_settings");
     let previous_ccchan = service.get_settings().ccchan;
     let next_ccchan = settings.ccchan.clone();
+    next_ccchan.validate_chat_runtimes()?;
 
     if let Some(ccchan) = app.try_state::<Arc<CCChanService>>() {
         ccchan.sync_saved_window_visibility(&app, previous_ccchan.window_visible, &next_ccchan)?;

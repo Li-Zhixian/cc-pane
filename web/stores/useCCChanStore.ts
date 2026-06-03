@@ -73,6 +73,21 @@ export const FALLBACK_PET: PetMeta = {
   },
 };
 
+export function getCCChanRuntimeValidationError(settings: CCChanSettings): string | null {
+  for (const role of settings.roles) {
+    if (role.runtimeKind !== "wsl") continue;
+    const label = role.name.trim() || role.id;
+    const remotePath = role.wslRemotePath?.trim() ?? "";
+    if (!remotePath) {
+      return `cc酱 WSL 角色“${label}”需要填写 WSL 远端路径。`;
+    }
+    if (!remotePath.startsWith("/") && !remotePath.startsWith("~")) {
+      return `cc酱 WSL 角色“${label}”的远端路径必须以 / 或 ~ 开头。`;
+    }
+  }
+  return null;
+}
+
 interface CCChanStoreState {
   settings: CCChanSettings;
   pets: PetMeta[];
