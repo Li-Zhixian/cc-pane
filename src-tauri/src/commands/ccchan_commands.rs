@@ -43,7 +43,7 @@ pub async fn resize_ccchan_for_chat(window: WebviewWindow, expanded: bool) -> Ap
 pub async fn resize_ccchan_for_menu(window: WebviewWindow, expanded: bool) -> AppResult<()> {
     debug!(expanded, "cmd::resize_ccchan_for_menu");
     let (width, height) = if expanded {
-        (300.0, 280.0)
+        (460.0, 260.0)
     } else {
         (120.0, 120.0)
     };

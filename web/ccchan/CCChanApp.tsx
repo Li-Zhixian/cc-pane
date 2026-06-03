@@ -27,6 +27,11 @@ const WANDER_STEP_MS = 120;
 const WANDER_EDGE_PAD = 40;
 const WANDER_MIN_DISTANCE = 160;
 
+function formatSessionTitle(sessionId: string) {
+  const trimmed = sessionId.trim();
+  return trimmed ? `Session ${trimmed.slice(0, 8)}` : "Session";
+}
+
 function getEventPetState(event: CCChanEvent): CCChanPetState {
   if (event.kind === "task-complete") return "happy";
   if (event.kind === "task-failed") return "sad";
@@ -232,7 +237,7 @@ export function CCChanApp() {
     listen<CCChanEvent>("ccchan-event", (event) => {
       const payload = event.payload;
       const nextState = getEventPetState(payload);
-      const title = payload.title ?? payload.sessionId;
+      const title = payload.title ?? formatSessionTitle(payload.sessionId);
       setEventState(nextState);
       setBubbleText(payload.kind === "task-complete" ? `${title} 完成` : payload.kind === "task-failed" ? `${title} 失败` : `${title} 等待输入`);
       if (payload.kind === "task-complete") toast.success(title);
@@ -308,8 +313,8 @@ export function CCChanApp() {
       await invoke("resize_ccchan_for_menu", { expanded: true }).catch(() => {});
     }
     setMenuOwnsResize(openedForMenu);
-    // Place menu just below mascot (mascot occupies top-left 120×120 of the
-    // expanded 300×280 window). Keep within the expanded window bounds.
+    // Place menu just below mascot (mascot occupies top-left 120x120 of the
+    // expanded menu window). Keep within the expanded window bounds.
     setMenuPosition({ x: Math.min(event.clientX, 140), y: Math.min(event.clientY + 4, 130) });
   }
 

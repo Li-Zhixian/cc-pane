@@ -726,7 +726,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
               border: "1px solid var(--app-border)",
             }}
           >
-            x: {value.windowX ?? "-"} · y: {value.windowY ?? "-"} · 60x60 / 380x520
+            x: {value.windowX ?? "-"} · y: {value.windowY ?? "-"} · 120x120 / chat 460x640 / menu 460x260
           </span>
           <Button
             type="button"

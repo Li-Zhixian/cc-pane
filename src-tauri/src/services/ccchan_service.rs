@@ -747,10 +747,11 @@ impl CCChanService {
             return;
         };
 
+        let title = ccchan_session_title(session_id);
         let payload = serde_json::json!({
             "kind": kind,
             "sessionId": session_id,
-            "title": serde_json::Value::Null,
+            "title": title,
             "ok": ok,
             "ts": current_epoch_seconds(),
         });
@@ -1578,6 +1579,15 @@ fn current_epoch_seconds() -> u64 {
         .as_secs()
 }
 
+fn ccchan_session_title(session_id: &str) -> String {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        return "Session".to_string();
+    }
+    let short: String = trimmed.chars().take(8).collect();
+    format!("Session {short}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1907,6 +1917,15 @@ mod tests {
 
         assert_eq!(pet.id, "folder-id");
         assert_eq!(pet.display_name, "folder-id");
+    }
+
+    #[test]
+    fn ccchan_session_title_shortens_session_ids_for_notifications() {
+        assert_eq!(
+            ccchan_session_title("12345678-90ab-cdef"),
+            "Session 12345678"
+        );
+        assert_eq!(ccchan_session_title("   "), "Session");
     }
 
     #[test]
