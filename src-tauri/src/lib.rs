@@ -13,10 +13,10 @@ pub mod utils;
 
 use ccchan_commands::{
     delete_ccchan_user_pet, get_ccchan_pets, get_ccchan_settings, hide_ccchan,
-    install_ccchan_pet_from_path, install_ccchan_pet_from_preview, move_ccchan_window,
-    preview_ccchan_pet_from_path, preview_ccchan_pet_from_url, resize_ccchan_for_chat,
-    resize_ccchan_for_menu, save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat,
-    stop_ccchan_chat,
+    install_ccchan_pet_from_path, install_ccchan_pet_from_preview, list_ccchan_awesome_codex_pets,
+    move_ccchan_window, preview_ccchan_awesome_codex_pet, preview_ccchan_pet_from_path,
+    preview_ccchan_pet_from_url, resize_ccchan_for_chat, resize_ccchan_for_menu,
+    save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat, stop_ccchan_chat,
 };
 use ccchan_service::{CCChanService, CcChanSessionNotifier};
 use commands::{
@@ -1537,6 +1537,8 @@ pub fn run() {
             stop_ccchan_chat,
             get_ccchan_pets,
             preview_ccchan_pet_from_url,
+            list_ccchan_awesome_codex_pets,
+            preview_ccchan_awesome_codex_pet,
             preview_ccchan_pet_from_path,
             install_ccchan_pet_from_preview,
             install_ccchan_pet_from_path,

@@ -25,6 +25,8 @@ const CCCHAN_HELPER_PROMPT: &str =
     include_str!("../../resources/claude-bundle/default-skills/ccchan-helper.md");
 const MAX_PET_PACKAGE_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PET_FILES: usize = 128;
+const AWESOME_CODEX_PET_BASE_URL: &str =
+    "https://raw.githubusercontent.com/legeling/awesome-codex-pet/main";
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +38,25 @@ pub struct PetMeta {
     pub source: PetSource,
     pub atlas: PetAtlas,
     pub animations: HashMap<String, PetAnimation>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AwesomeCodexPetEntry {
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default, rename = "author_handle")]
+    pub author_handle: String,
+    #[serde(default, rename = "author_url")]
+    pub author_url: String,
+    #[serde(default, rename = "primary_category")]
+    pub primary_category: String,
+    #[serde(default)]
+    pub license: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +213,53 @@ impl CCChanService {
 
     pub fn get_pets(&self, app: &AppHandle) -> AppResult<Vec<PetMeta>> {
         self.discover_pets(app)
+    }
+
+    pub async fn list_awesome_codex_pets(&self) -> AppResult<Vec<AwesomeCodexPetEntry>> {
+        let catalog_url = awesome_codex_pet_url("pets.json")?;
+        let download = download_limited_pet_url(catalog_url, "Awesome Codex pet catalog").await?;
+        let mut entries: Vec<AwesomeCodexPetEntry> = serde_json::from_slice(&download.bytes)
+            .map_err(|error| {
+                AppError::from(format!("Invalid Awesome Codex pet catalog: {error}"))
+            })?;
+        entries.retain(|entry| awesome_codex_pet_slug_is_safe(&entry.slug));
+        entries.sort_by(|left, right| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+                .then_with(|| left.slug.cmp(&right.slug))
+        });
+        Ok(entries)
+    }
+
+    pub async fn preview_awesome_codex_pet(&self, slug: String) -> AppResult<PetInstallPreview> {
+        let slug = normalize_awesome_codex_pet_slug(&slug)?;
+        let pet_json_url = awesome_codex_pet_url(&format!("pets/{slug}/pet.json"))?;
+        let pet_json =
+            download_limited_pet_url(pet_json_url.clone(), "Awesome Codex pet metadata").await?;
+        let definition: PetDefinition = serde_json::from_slice(&pet_json.bytes)
+            .map_err(|error| AppError::from(format!("Invalid Awesome Codex pet.json: {error}")))?;
+        let sprite_path = awesome_codex_sprite_path(&definition.spritesheet_path)?;
+        let sprite_url = awesome_codex_pet_url(&format!("pets/{slug}/{sprite_path}"))?;
+        let sprite = download_limited_pet_url(sprite_url, "Awesome Codex pet spritesheet").await?;
+
+        let staging_id = uuid::Uuid::new_v4().to_string();
+        let staging_dir = self.pet_staging_dir().join(&staging_id);
+        let pet_dir = staging_dir.join(&slug);
+        std::fs::create_dir_all(&pet_dir)?;
+        std::fs::write(pet_dir.join("pet.json"), pet_json.bytes)?;
+        let sprite_target = pet_dir.join(&sprite_path);
+        if let Some(parent) = sprite_target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(sprite_target, sprite.bytes)?;
+
+        let pet = load_pet_from_dir(&pet_dir, PetSource::User)?;
+        Ok(PetInstallPreview {
+            staging_id,
+            pet,
+            source_path: pet_json_url.to_string(),
+        })
     }
 
     pub async fn preview_pet_from_url(&self, url: String) -> AppResult<PetInstallPreview> {
@@ -1046,6 +1114,7 @@ fn find_pet_root(path: &Path) -> AppResult<PathBuf> {
             path.display()
         )));
     }
+    let mut child_pet_roots = Vec::new();
     for entry in std::fs::read_dir(path).map_err(|error| {
         AppError::from(format!(
             "Failed to read pet path {}: {}",
@@ -1056,8 +1125,17 @@ fn find_pet_root(path: &Path) -> AppResult<PathBuf> {
         let entry = entry?;
         let child = entry.path();
         if child.is_dir() && child.join("pet.json").exists() {
-            return Ok(child);
+            child_pet_roots.push(child);
         }
+    }
+    if child_pet_roots.len() == 1 {
+        return Ok(child_pet_roots.remove(0));
+    }
+    if child_pet_roots.len() > 1 {
+        return Err(AppError::from(format!(
+            "Multiple pet.json children found in {}; select one pet folder instead",
+            path.display()
+        )));
     }
     Err(AppError::from(format!(
         "No pet.json found in {}",
@@ -1109,6 +1187,51 @@ fn parse_codex_pet_link(parsed: &reqwest::Url) -> AppResult<CodexPetLink> {
         image_url,
         description,
     })
+}
+
+fn awesome_codex_pet_url(path: &str) -> AppResult<reqwest::Url> {
+    reqwest::Url::parse(&format!(
+        "{}/{}",
+        AWESOME_CODEX_PET_BASE_URL,
+        path.trim_start_matches('/')
+    ))
+    .map_err(|error| AppError::from(format!("Invalid Awesome Codex pet URL: {error}")))
+}
+
+fn awesome_codex_pet_slug_is_safe(slug: &str) -> bool {
+    !slug.trim().is_empty()
+        && slug.len() <= 128
+        && slug
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && !slug.starts_with('.')
+        && !slug.contains("..")
+}
+
+fn normalize_awesome_codex_pet_slug(slug: &str) -> AppResult<String> {
+    let trimmed = slug.trim();
+    if !awesome_codex_pet_slug_is_safe(trimmed) {
+        return Err(AppError::from(format!(
+            "Invalid Awesome Codex pet slug: {}",
+            slug
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn awesome_codex_sprite_path(path: &str) -> AppResult<PathBuf> {
+    let path = safe_relative_pet_path(path)?;
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "webp" | "png" | "gif" | "jpg" | "jpeg" => Ok(path),
+        _ => Err(AppError::from(
+            "Awesome Codex pet spritesheet must be .webp, .png, .gif, .jpg, or .jpeg",
+        )),
+    }
 }
 
 fn codex_pet_query_value(parsed: &reqwest::Url, key: &str) -> Option<String> {
@@ -1504,6 +1627,17 @@ mod tests {
     }
 
     #[test]
+    fn find_pet_root_rejects_parent_folder_with_multiple_pet_children() {
+        let temp = tempdir().expect("tempdir");
+        write_minimal_pet(&temp.path().join("one"), "one");
+        write_minimal_pet(&temp.path().join("two"), "two");
+
+        let error = find_pet_root(temp.path()).expect_err("multiple pets rejected");
+
+        assert!(error.to_string().contains("Multiple pet.json children"));
+    }
+
+    #[test]
     fn extract_pet_zip_rejects_unsafe_paths() {
         let temp = tempdir().expect("tempdir");
         let bytes = zip_bytes(&[("../pet.json", b"{}")]);
@@ -1618,6 +1752,25 @@ mod tests {
             .expect_err("http imageUrl rejected")
             .to_string()
             .contains("https"));
+    }
+
+    #[test]
+    fn awesome_codex_pet_slug_validation_blocks_path_traversal() {
+        assert_eq!(
+            normalize_awesome_codex_pet_slug("doro--author").expect("valid slug"),
+            "doro--author"
+        );
+        assert!(normalize_awesome_codex_pet_slug("../doro").is_err());
+        assert!(normalize_awesome_codex_pet_slug("doro/pet").is_err());
+        assert!(normalize_awesome_codex_pet_slug(".hidden").is_err());
+    }
+
+    #[test]
+    fn awesome_codex_sprite_path_rejects_unsafe_or_unsupported_paths() {
+        assert!(awesome_codex_sprite_path("spritesheet.webp").is_ok());
+        assert!(awesome_codex_sprite_path("assets/spritesheet.png").is_ok());
+        assert!(awesome_codex_sprite_path("../spritesheet.webp").is_err());
+        assert!(awesome_codex_sprite_path("spritesheet.svg").is_err());
     }
 
     #[test]

@@ -19,4 +19,21 @@ describe("aggregateStatus", () => {
     const statuses: TerminalStatusType[] = ["error", "toolRunning", "idle"];
     expect(aggregateStatus(statuses)).toBe("sad");
   });
+
+  it("prioritizes waiting over thinking and working statuses", () => {
+    const statuses: TerminalStatusType[] = ["toolRunning", "thinking", "waitingInput"];
+    expect(aggregateStatus(statuses)).toBe("waiting");
+  });
+
+  it("prioritizes thinking over active work statuses", () => {
+    const statuses: TerminalStatusType[] = ["active", "toolRunning", "thinking"];
+    expect(aggregateStatus(statuses)).toBe("thinking");
+  });
+
+  it.each<TerminalStatusType>(["toolRunning", "compacting", "active", "initializing"])(
+    "maps %s to working",
+    (status) => {
+      expect(aggregateStatus([status])).toBe("working");
+    },
+  );
 });

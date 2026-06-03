@@ -2,6 +2,7 @@ import { emitTo } from "@tauri-apps/api/event";
 import { useMemo } from "react";
 import { useTerminalStatusStore } from "@/stores";
 import type { TerminalStatusInfo, TerminalStatusType } from "@/types";
+import type { CCChanScopeMode } from "./types";
 
 const STATUS_COLORS: Record<TerminalStatusType, string> = {
   initializing: "#8e8e93",
@@ -30,17 +31,27 @@ function getDotTitle(info: TerminalStatusInfo) {
   return `${info.sessionId} · ${info.status}${tool}`;
 }
 
-export function visibleSessionDots(statuses: TerminalStatusInfo[]) {
+export function visibleSessionDots(
+  statuses: TerminalStatusInfo[],
+  scopeMode: CCChanScopeMode = "global",
+  activeSessionId: string | null = null,
+) {
   return statuses
+    .filter((info) => scopeMode === "global" || info.sessionId === activeSessionId)
     .filter((info) => VISIBLE_DOT_STATUSES.has(info.status))
     .sort((a, b) => a.sessionId.localeCompare(b.sessionId));
 }
 
-export function SessionDots() {
+interface SessionDotsProps {
+  scopeMode?: CCChanScopeMode;
+  activeSessionId?: string | null;
+}
+
+export function SessionDots({ scopeMode = "global", activeSessionId = null }: SessionDotsProps) {
   const statusMap = useTerminalStatusStore((state) => state.statusMap);
   const dots = useMemo(
-    () => visibleSessionDots(Array.from(statusMap.values())),
-    [statusMap],
+    () => visibleSessionDots(Array.from(statusMap.values()), scopeMode, activeSessionId),
+    [activeSessionId, scopeMode, statusMap],
   );
 
   if (dots.length === 0) return null;

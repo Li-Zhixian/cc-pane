@@ -352,7 +352,7 @@ export function CCChanApp() {
     >
       <div className="absolute left-0 top-0" style={{ width: PET_SIZE, height: PET_SIZE }}>
         <div className="pointer-events-auto absolute left-1/2 top-1 z-10 -translate-x-1/2">
-          <SessionDots />
+          <SessionDots scopeMode={settings.scopeMode} activeSessionId={activeMainSessionId} />
         </div>
         {bubbleText && (
           <div

@@ -1,4 +1,6 @@
-use crate::ccchan_service::{clamp_position_to_visible, CCChanService, PetInstallPreview, PetMeta};
+use crate::ccchan_service::{
+    clamp_position_to_visible, AwesomeCodexPetEntry, CCChanService, PetInstallPreview, PetMeta,
+};
 use crate::models::settings::CCChanSettings;
 use crate::services::TerminalService;
 use crate::utils::{AppError, AppResult};
@@ -161,6 +163,33 @@ pub async fn preview_ccchan_pet_from_url(
         .inner()
         .clone();
     service.preview_pet_from_url(url).await
+}
+
+#[tauri::command]
+pub async fn list_ccchan_awesome_codex_pets(
+    app: AppHandle,
+) -> AppResult<Vec<AwesomeCodexPetEntry>> {
+    debug!("cmd::list_ccchan_awesome_codex_pets");
+    let service = app
+        .try_state::<Arc<CCChanService>>()
+        .ok_or_else(|| AppError::from("CCChanService is not registered"))?
+        .inner()
+        .clone();
+    service.list_awesome_codex_pets().await
+}
+
+#[tauri::command]
+pub async fn preview_ccchan_awesome_codex_pet(
+    app: AppHandle,
+    slug: String,
+) -> AppResult<PetInstallPreview> {
+    debug!(slug = %slug, "cmd::preview_ccchan_awesome_codex_pet");
+    let service = app
+        .try_state::<Arc<CCChanService>>()
+        .ok_or_else(|| AppError::from("CCChanService is not registered"))?
+        .inner()
+        .clone();
+    service.preview_awesome_codex_pet(slug).await
 }
 
 #[tauri::command]

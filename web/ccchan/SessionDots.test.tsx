@@ -22,4 +22,17 @@ describe("visibleSessionDots", () => {
 
     expect(dots.map((dot) => dot.sessionId)).toEqual(["a-working", "b-waiting"]);
   });
+
+  it("filters dots to the active session in focusedWindow mode", () => {
+    const dots = visibleSessionDots(
+      [
+        status("a-working", "toolRunning"),
+        status("b-waiting", "waitingInput"),
+      ],
+      "focusedWindow",
+      "b-waiting",
+    );
+
+    expect(dots.map((dot) => dot.sessionId)).toEqual(["b-waiting"]);
+  });
 });

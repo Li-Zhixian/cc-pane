@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -8,7 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CCCHAN_ROLE_PROMPT, FALLBACK_PET, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
-import type { CCChanPetInstallPreview, CCChanRolePreset, CCChanSettings as CCChanSettingsValue } from "@/ccchan/types";
+import type {
+  AwesomeCodexPetEntry,
+  CCChanPetInstallPreview,
+  CCChanRolePreset,
+  CCChanSettings as CCChanSettingsValue,
+} from "@/ccchan/types";
 
 interface CCChanSettingsProps {
   value: CCChanSettingsValue;
@@ -26,12 +31,95 @@ const PET_RESOURCE_LINKS = [
   { label: "Codex 官方说明", url: "https://developers.openai.com/codex/app/settings#codex-pets" },
 ] as const;
 
+const ROLE_TEMPLATES: Array<{
+  id: string;
+  label: string;
+  name: string;
+  aiEngine: CCChanRolePreset["aiEngine"];
+  runtimeKind: CCChanRolePreset["runtimeKind"];
+  systemPrompt: string;
+}> = [
+  {
+    id: "claude-local",
+    label: "Claude 本机",
+    name: "Claude 本机助手",
+    aiEngine: "claude",
+    runtimeKind: "local",
+    systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+  },
+  {
+    id: "codex-local",
+    label: "Codex 本机",
+    name: "Codex 本机助手",
+    aiEngine: "codex",
+    runtimeKind: "local",
+    systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+  },
+  {
+    id: "claude-wsl",
+    label: "Claude WSL",
+    name: "Claude WSL 助手",
+    aiEngine: "claude",
+    runtimeKind: "wsl",
+    systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+  },
+  {
+    id: "codex-wsl",
+    label: "Codex WSL",
+    name: "Codex WSL 助手",
+    aiEngine: "codex",
+    runtimeKind: "wsl",
+    systemPrompt: DEFAULT_CCCHAN_ROLE_PROMPT,
+  },
+  {
+    id: "reviewer",
+    label: "审查员",
+    name: "代码审查员",
+    aiEngine: "codex",
+    runtimeKind: "local",
+    systemPrompt: [
+      DEFAULT_CCCHAN_ROLE_PROMPT,
+      "Focus on bugs, regressions, missing tests, and concrete risks. Report findings first with file references.",
+    ].join("\n\n"),
+  },
+  {
+    id: "executor",
+    label: "执行者",
+    name: "任务执行者",
+    aiEngine: "codex",
+    runtimeKind: "local",
+    systemPrompt: [
+      DEFAULT_CCCHAN_ROLE_PROMPT,
+      "Implement the user's selected task end-to-end, run relevant checks, and keep progress concise.",
+    ].join("\n\n"),
+  },
+];
+
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
+  const [awesomePets, setAwesomePets] = useState<AwesomeCodexPetEntry[]>([]);
+  const [awesomeQuery, setAwesomeQuery] = useState("");
+  const [awesomeLoading, setAwesomeLoading] = useState(false);
+  const [awesomeInstallSlug, setAwesomeInstallSlug] = useState<string | null>(null);
   const petOptions = pets.length > 0 ? pets : [FALLBACK_PET];
   const activeRole = value.roles.find((role) => role.id === value.activeRoleId) ?? value.roles[0];
   const userPets = petOptions.filter((pet) => pet.source === "user");
+  const filteredAwesomePets = useMemo(() => {
+    const query = awesomeQuery.trim().toLowerCase();
+    const source = query
+      ? awesomePets.filter((pet) => [
+          pet.name,
+          pet.slug,
+          pet.author,
+          pet.authorHandle,
+          pet.primaryCategory,
+          pet.license,
+          pet.description,
+        ].some((value) => value.toLowerCase().includes(query)))
+      : awesomePets;
+    return source.slice(0, 12);
+  }, [awesomePets, awesomeQuery]);
 
   useEffect(() => {
     void load();
@@ -68,6 +156,25 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       runtimeKind: "local",
       wslRemotePath: null,
       wslDistro: null,
+    };
+    onChange(normalizeCCChanSettings({
+      ...value,
+      activeRoleId: id,
+      roles: [...value.roles, role],
+    }));
+  }
+
+  function addRoleFromTemplate(template: (typeof ROLE_TEMPLATES)[number]) {
+    const id = `${template.id}-${Date.now().toString(36)}`;
+    const role: CCChanRolePreset = {
+      id,
+      name: template.name,
+      aiEngine: template.aiEngine,
+      petId: value.defaultPetId,
+      systemPrompt: template.systemPrompt,
+      runtimeKind: template.runtimeKind,
+      wslRemotePath: template.runtimeKind === "wsl" ? activeRole?.wslRemotePath ?? null : null,
+      wslDistro: template.runtimeKind === "wsl" ? activeRole?.wslDistro ?? null : null,
     };
     onChange(normalizeCCChanSettings({
       ...value,
@@ -170,6 +277,35 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     }
   }
 
+  async function loadAwesomePets() {
+    setAwesomeLoading(true);
+    try {
+      const entries = await invoke<AwesomeCodexPetEntry[]>("list_ccchan_awesome_codex_pets");
+      setAwesomePets(entries);
+      toast.success(`已载入 ${entries.length} 个 Awesome Codex Pet`);
+    } catch (error) {
+      toast.error(`载入 Awesome Codex Pet 失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAwesomeLoading(false);
+    }
+  }
+
+  async function installAwesomePet(entry: AwesomeCodexPetEntry) {
+    setAwesomeInstallSlug(entry.slug);
+    try {
+      const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_awesome_codex_pet", { slug: entry.slug });
+      const confirmed = window.confirm(`安装 Awesome Codex Pet "${preview.pet.displayName}" (${preview.pet.id})？`);
+      if (!confirmed) return;
+      await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
+      await load();
+      toast.success("桌宠已安装");
+    } catch (error) {
+      toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAwesomeInstallSlug(null);
+    }
+  }
+
   const selectStyle = {
     border: "1px solid var(--app-border)",
     background: "var(--app-content)",
@@ -210,6 +346,13 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           <Button type="button" size="sm" variant="ghost" disabled={!activeRole || activeRole.id === "default"} onClick={removeActiveRole}>
             删除
           </Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {ROLE_TEMPLATES.map((template) => (
+            <Button key={template.id} type="button" size="sm" variant="ghost" onClick={() => addRoleFromTemplate(template)}>
+              {template.label}
+            </Button>
+          ))}
         </div>
       </div>
 
@@ -294,27 +437,34 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </div>
 
           {activeRole.runtimeKind === "wsl" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="flex flex-col gap-1">
-                <Label>WSL 远端路径</Label>
-                <input
-                  value={activeRole.wslRemotePath ?? ""}
-                  placeholder="/mnt/d/my-project/cc-pane"
-                  className="h-9 rounded-md px-2 text-[13px] outline-none"
-                  style={selectStyle}
-                  onChange={(event) => updateRole(activeRole.id, { wslRemotePath: event.target.value || null })}
-                />
+            <div className="flex flex-col gap-2">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <Label>WSL 远端路径</Label>
+                  <input
+                    value={activeRole.wslRemotePath ?? ""}
+                    placeholder="/mnt/d/my-project/cc-pane"
+                    className="h-9 rounded-md px-2 text-[13px] outline-none"
+                    style={selectStyle}
+                    onChange={(event) => updateRole(activeRole.id, { wslRemotePath: event.target.value || null })}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>WSL 发行版</Label>
+                  <input
+                    value={activeRole.wslDistro ?? ""}
+                    placeholder="Ubuntu-24.04，可留空使用默认"
+                    className="h-9 rounded-md px-2 text-[13px] outline-none"
+                    style={selectStyle}
+                    onChange={(event) => updateRole(activeRole.id, { wslDistro: event.target.value || null })}
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label>WSL 发行版</Label>
-                <input
-                  value={activeRole.wslDistro ?? ""}
-                  placeholder="Ubuntu-24.04，可留空使用默认"
-                  className="h-9 rounded-md px-2 text-[13px] outline-none"
-                  style={selectStyle}
-                  onChange={(event) => updateRole(activeRole.id, { wslDistro: event.target.value || null })}
-                />
-              </div>
+              {!activeRole.wslRemotePath?.trim() && (
+                <p className="m-0 rounded-md border px-2 py-1 text-[11px]" style={{ borderColor: "var(--app-warning-border, #b7791f)", color: "var(--app-warning-text, #f6ad55)" }}>
+                  WSL 角色需要填写远端路径，否则 cc酱 chat 启动时会被后端拒绝。
+                </p>
+              )}
             </div>
           )}
 
@@ -440,6 +590,65 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
               {link.label}
             </Button>
           ))}
+        </div>
+        <div className="flex flex-col gap-2 rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-[12px] font-medium" style={{ color: "var(--app-text-primary)" }}>
+                Awesome Codex Pet 目录
+              </div>
+              <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
+                从 awesome-codex-pet 的公开 catalog 拉取，可搜索并一键安装。
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="secondary" disabled={awesomeLoading} onClick={() => void loadAwesomePets()}>
+              {awesomeLoading ? "载入中..." : awesomePets.length > 0 ? "刷新目录" : "载入目录"}
+            </Button>
+          </div>
+          {awesomePets.length > 0 && (
+            <>
+              <input
+                value={awesomeQuery}
+                placeholder="搜索名称、作者、分类或 license"
+                className="h-8 rounded-md px-2 text-[12px] outline-none"
+                style={selectStyle}
+                onChange={(event) => setAwesomeQuery(event.target.value)}
+              />
+              <div className="grid max-h-72 gap-2 overflow-y-auto md:grid-cols-2">
+                {filteredAwesomePets.map((entry) => (
+                  <div
+                    key={entry.slug}
+                    className="flex flex-col gap-2 rounded-md border p-2 text-[12px]"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-content)" }}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium" style={{ color: "var(--app-text-primary)" }}>{entry.name}</div>
+                      <div className="truncate" style={{ color: "var(--app-text-tertiary)" }}>
+                        {entry.author || entry.authorHandle || "unknown"} · {entry.primaryCategory || "uncategorized"}
+                      </div>
+                    </div>
+                    {entry.description && (
+                      <p className="m-0 max-h-9 overflow-hidden" style={{ color: "var(--app-text-secondary)" }}>
+                        {entry.description}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate" style={{ color: "var(--app-text-tertiary)" }}>{entry.license || "license unknown"}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={awesomeInstallSlug === entry.slug}
+                        onClick={() => void installAwesomePet(entry)}
+                      >
+                        {awesomeInstallSlug === entry.slug ? "安装中..." : "安装"}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
         {userPets.length > 0 && (
           <div className="flex max-h-40 flex-col gap-2 overflow-y-auto rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
