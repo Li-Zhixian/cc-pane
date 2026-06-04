@@ -231,4 +231,22 @@ describe("CCChanApp", () => {
     expect(settings.windowY).toBe(120);
     nowSpy.mockRestore();
   });
+
+  it("hides and persists visibility when the context menu exit action is used", async () => {
+    render(<CCChanApp />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "打开 cc酱 chat" }), {
+      clientX: 40,
+      clientY: 40,
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "退出" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
+      expect(invoke).toHaveBeenCalledWith("hide_ccchan");
+    });
+    expect(windowMock.close).not.toHaveBeenCalled();
+    expect(useCCChanStore.getState().chatSessionId).not.toBe("active-session");
+    expect(useCCChanStore.getState().settings.windowVisible).toBe(false);
+  });
 });

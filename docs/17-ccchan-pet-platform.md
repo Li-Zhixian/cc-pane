@@ -30,6 +30,8 @@ The chat panel blocks obviously invalid WSL role paths before starting a PTY and
 
 Closing the chat panel only collapses the ccchan window back to the pet size. The active chat PTY stays mounted in the hidden panel, terminal output continues to be buffered, and reopening the panel replays output captured while hidden. Closing during startup also keeps the pending startup mounted so a late session id is retained instead of being killed as stale. Role changes made while the panel is hidden do not immediately stop the hidden session; reopening the panel applies the normal visible role-switch behavior. The explicit stop button still terminates the active chat session, clears the visible transcript, and suppresses automatic restart until the panel is reopened.
 
+The mascot context menu's exit action stops the active ccchan chat and uses the same hide path as the status bar and tray toggle, so `windowVisible` stays synchronized instead of closing the WebView without persisting visibility.
+
 Changing a visible role's WSL remote path or distro is treated as a role-session change: ccchan stops the previous PTY, clears the active session id, and starts a new chat session with the updated WSL path and distro after the parent applies the cleared session id.
 
 The ccchan window uses consistent sizes across frontend and backend resize commands: collapsed pet `120x120`, chat `460x640`, and context menu `460x260`.

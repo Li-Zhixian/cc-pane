@@ -440,7 +440,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
               >
                 {petOptions.map((pet) => (
                   <option key={pet.id} value={pet.id}>
-                    {pet.displayName} · {pet.source}
+                    {pet.displayName} · {getPetSourceLabel(pet.source)}
                   </option>
                 ))}
               </select>

@@ -333,6 +333,14 @@ export function CCChanApp() {
     setWindowVisible(false);
   }
 
+  async function exitWindow() {
+    if (chatSessionId) {
+      await invoke("stop_ccchan_chat", { sessionId: chatSessionId }).catch(() => {});
+      setChatSessionId(null);
+    }
+    await hideWindow();
+  }
+
   function switchRole(roleId: string) {
     setActiveRoleId(roleId);
     const nextSettings = useCCChanStore.getState().settings;
@@ -421,10 +429,7 @@ export function CCChanApp() {
           activeRoleId={settings.activeRoleId}
           onSwitchRole={switchRole}
           onOpenSettings={() => void emitTo("main", "ccchan:open-settings")}
-          onExit={() => {
-            if (chatSessionId) void invoke("stop_ccchan_chat", { sessionId: chatSessionId }).catch(() => {});
-            void getCurrentWindow().close().catch(() => {});
-          }}
+          onExit={() => void exitWindow().catch(() => {})}
           onClose={closeMenu}
         />
       )}

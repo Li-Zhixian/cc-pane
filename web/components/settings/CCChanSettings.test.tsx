@@ -1,5 +1,5 @@
 import "@/i18n";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -53,6 +53,16 @@ const customSourcePet: PetMeta = {
   description: "Custom source pet",
   spritesheetUrl: "asset://external-pet",
   source: "custom",
+  atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
+  animations: { idle: { row: 0, frames: 1, fps: 1 } },
+};
+
+const codexHomePet: PetMeta = {
+  id: "local-home-pet",
+  displayName: "Local Home Pet",
+  description: "Local home pet",
+  spritesheetUrl: "asset://local-home-pet",
+  source: "codexHome",
   atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
   animations: { idle: { row: 0, frames: 1, fps: 1 } },
 };
@@ -147,11 +157,32 @@ describe("CCChanSettings", () => {
   });
 
   it("shows neutral pet source labels without resource-link affordances", async () => {
+    useCCChanStore.setState({
+      settings: DEFAULT_CCCHAN_SETTINGS,
+      pets: [doroPet, userPet, customSourcePet, codexHomePet],
+      loaded: true,
+    });
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet, userPet, customSourcePet, codexHomePet]);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
     renderSettings();
     await waitForInitialLoad();
 
     expect(screen.getByText("宠物来源")).toBeInTheDocument();
     expect(screen.getByText("默认本地目录")).toBeInTheDocument();
+    const rolePetSelect = screen.getAllByRole("combobox").find((select) =>
+      within(select).queryByRole("option", { name: "Local Home Pet · 本地目录" })
+    );
+    expect(rolePetSelect).toBeDefined();
+    const rolePetOptions = within(rolePetSelect as HTMLElement)
+      .getAllByRole("option")
+      .map((option) => option.textContent ?? "");
+    expect(rolePetOptions).toContain("Local Home Pet · 本地目录");
+    expect(rolePetOptions).toContain("External Pet · 本地目录");
+    expect(rolePetOptions).toContain("Custom Pet · 已安装");
+    expect(rolePetOptions.join("\n")).not.toMatch(/codexHome|custom/);
     expect(screen.queryByRole("button", { name: "链接安装" })).not.toBeInTheDocument();
     expect(screen.getByText("额外本地来源")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加来源" })).toBeInTheDocument();
