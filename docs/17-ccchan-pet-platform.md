@@ -136,6 +136,7 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - The main window is visible as `CC-Panes [DEV]`, and the ccchan WebView2 mascot window is visible as `cc酱` at `120x120`.
 - The ccchan window has topmost extended style bits (`WS_EX_TOPMOST`) and persisted `windowVisible`, `windowX`, and `windowY` updates in `C:\Users\ROG\.cc-panes-dev\config.toml`.
 - A later scripted Win32 window probe on the same branch found `CC-Panes [DEV]` and `cc酱` under the dev process `77300`; the mascot window was `120x120` and `TopMost=true`.
+- After the hidden-chat lifecycle fixes, a fresh scripted Win32 probe still found the dev process `77300` with `CC-Panes [DEV]` visible and a separate `cc酱` window visible at `120x120`, positioned at `(765, 489)`, with `TopMost=true`.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - Triggering `ccpanes://pets/install/?name=DeepLinkProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` and a real `awesome-codex-pet` style link did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
 - With the dev app stopped and Vite still serving `localhost:14200`, triggering `ccpanes://pets/install/?name=ColdStartProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
