@@ -185,6 +185,7 @@ describe("CCChanSettings", () => {
     expect(screen.getByRole("button", { name: "添加来源" })).toBeInTheDocument();
     expect(screen.getByText(/文件夹和 zip 安装前会先预览并确认/)).toBeInTheDocument();
     expect(screen.queryByText(/HTTPS|桌宠安装链接/)).not.toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/codex-pet|codex-pets|awesome-codex|链接安装|HTTPS/i);
     expect(invoke).not.toHaveBeenCalledWith("preview_ccchan_pet_from_url", expect.anything());
   });
 
