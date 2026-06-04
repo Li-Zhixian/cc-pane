@@ -32,6 +32,8 @@ const MAX_PET_PACKAGE_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PET_FILES: usize = 128;
 const PET_DOWNLOAD_TIMEOUT_SECS: u64 = 30;
 const PET_DOWNLOAD_MAX_REDIRECTS: usize = 5;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1673,9 +1675,9 @@ fn validate_pet_dir_copy_limits_inner(source: &Path, limits: &mut PetCopyLimits)
         let entry = entry?;
         let file_type = entry.file_type()?;
         let source_path = entry.path();
-        if file_type.is_symlink() {
+        if is_pet_forbidden_link_entry(&source_path, &file_type)? {
             return Err(AppError::from(format!(
-                "ccchan pet folders cannot contain symlinks: {}",
+                "ccchan pet folders cannot contain symlinks or reparse points: {}",
                 source_path.display()
             )));
         }
@@ -1717,9 +1719,9 @@ fn copy_pet_dir_limited(source: &Path, target: &Path, limits: &mut PetCopyLimits
         let file_type = entry.file_type()?;
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
-        if file_type.is_symlink() {
+        if is_pet_forbidden_link_entry(&source_path, &file_type)? {
             return Err(AppError::from(format!(
-                "ccchan pet folders cannot contain symlinks: {}",
+                "ccchan pet folders cannot contain symlinks or reparse points: {}",
                 source_path.display()
             )));
         }
@@ -1753,6 +1755,32 @@ fn copy_pet_dir_limited(source: &Path, target: &Path, limits: &mut PetCopyLimits
         }
     }
     Ok(())
+}
+
+fn is_pet_forbidden_link_entry(path: &Path, file_type: &std::fs::FileType) -> AppResult<bool> {
+    if file_type.is_symlink() {
+        return Ok(true);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        let attributes = std::fs::symlink_metadata(path)
+            .map_err(|error| {
+                AppError::from(format!(
+                    "Failed to read pet entry metadata {}: {}",
+                    path.display(),
+                    error
+                ))
+            })?
+            .file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn extract_pet_zip(bytes: &[u8], target: &Path) -> AppResult<()> {
