@@ -28,6 +28,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "probe:ccchan:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/probe-ccchan-windows.ps1",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

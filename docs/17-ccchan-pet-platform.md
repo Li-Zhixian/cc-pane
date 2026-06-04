@@ -133,6 +133,7 @@ Windows-host compile/build checks run from WSL through PowerShell:
 
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo check -p cc-panes"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npm run build"`.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location 'D:\my-project\cc-pane'; npm run probe:ccchan:windows"` verifies the running dev process, a visible `120x120` topmost mascot window, a visible main window, protocol registration, and persisted dev ccchan config fields.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/installPet.test.ts web/components/settings/CCChanSettings.test.tsx --reporter=dot"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo test -p cc-panes-core wsl_hook_sync -- --nocapture; cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture; cargo test -p cc-cli-adapters codex -- --nocapture"` verifies WSL path mapping plus Codex Windows unsupported/WSL sync adapter behavior.
 
@@ -145,6 +146,7 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - After the hidden-chat lifecycle fixes, a fresh scripted Win32 probe still found the dev process `77300` with `CC-Panes [DEV]` visible and a separate `cc酱` window visible at `120x120`, positioned at `(765, 489)`, with `TopMost=true`.
 - A later ASCII-only Win32 probe on 2026-06-04 avoided Unicode title matching and enumerated windows by `cc-panes.exe` PID. It found the dev process at `D:\my-project\cc-pane\target\debug\cc-panes.exe`, a visible `120x120` topmost mascot window at `(563, 485)`, and a visible full-size main window under the same PID. A separate release process was also running, but the protocol registration still pointed to the dev executable.
 - A subsequent Win32 probe on 2026-06-04 found two `cc-panes.exe` processes: the installed release at `C:\Users\ROG\AppData\Local\cc-panes\cc-panes.exe` and the dev process at `D:\my-project\cc-pane\target\debug\cc-panes.exe`. Under the dev PID `59620`, it found `CC-Panes [DEV]` at `1724x1084` and a visible `120x120` ccchan window at `(666, 595)` with `TopMost=true`.
+- `npm run probe:ccchan:windows` now codifies that Win32 probe so future Windows-host validation does not depend on ad hoc scripts or Unicode window-title matching.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - `C:\Users\ROG\.cc-panes-dev\config.toml` has `windowVisible = true`, `windowX = 192.12036453656117`, and `windowY = 711.6158735115789`, confirming ccchan window visibility and position persistence in dev config.
 - A Windows screen probe on 2026-06-04 found one primary monitor with bounds `0,0 1707x1067`; multi-monitor behavior remains unverified in this environment because no secondary display is currently attached.
