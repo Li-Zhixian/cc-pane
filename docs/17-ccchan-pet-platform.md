@@ -84,11 +84,11 @@ The ccchan settings panel supports:
 - Custom directory source management: users can either type one read-only directory per line or use a directory picker to append another pet source, so local Codex Home mirrors, WSL UNC folders, and manually curated community pet folders can be added without hand-copying paths. Custom and Codex Home pets can also be copied into the user install directory from settings.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
-URL installs require `https://`, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
+URL installs require `https://`, keep redirects on `https://`, cap redirect chains at 5 hops, time out remote downloads after 30 seconds, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
 
 Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.com/legeling/awesome-codex-pet/main`, validate catalog slugs and relative spritesheet paths, and use the same staging/install flow as zip and URL installs.
 
-URL, zip, and Awesome catalog previews create a staging directory under `<data-dir>/ccchan/pet-staging`; successful installs remove that staging directory, and cancelled confirmation dialogs call `cancel_ccchan_pet_preview` to remove the staged preview instead of leaving abandoned packages behind.
+URL, zip, and Awesome catalog previews create a staging directory under `<data-dir>/ccchan/pet-staging`; successful installs, failed install attempts, and cancelled confirmation dialogs remove that staging directory instead of leaving abandoned packages behind.
 
 Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. CC-Panes registers its own `ccpanes://` desktop scheme through Tauri's deep-link and single-instance plugins; `ccpanes://pets/install?name=&imageUrl=` opens/focuses the main window, switches to ccchan settings, previews the pet, asks for confirmation, then installs through the same staging flow as pasted URL installs.
 

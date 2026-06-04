@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -26,6 +27,8 @@ const CCCHAN_HELPER_PROMPT: &str =
     include_str!("../../resources/claude-bundle/default-skills/ccchan-helper.md");
 const MAX_PET_PACKAGE_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PET_FILES: usize = 128;
+const PET_DOWNLOAD_TIMEOUT_SECS: u64 = 30;
+const PET_DOWNLOAD_MAX_REDIRECTS: usize = 5;
 const AWESOME_CODEX_PET_BASE_URL: &str =
     "https://raw.githubusercontent.com/legeling/awesome-codex-pet/main";
 
@@ -381,17 +384,22 @@ impl CCChanService {
     pub fn install_pet_from_preview(&self, staging_id: String) -> AppResult<PetMeta> {
         let staging_id = sanitize_existing_staging_id(&staging_id)?;
         let staging_dir = self.pet_staging_dir().join(staging_id);
-        let pet_root = find_pet_root(&staging_dir)?;
-        let pet = self.install_pet_dir(&pet_root)?;
-        if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
-            warn!(
-                path = %staging_dir.display(),
-                error = %error,
-                "failed to remove ccchan pet staging directory after install"
-            );
+        let result = (|| {
+            let pet_root = find_pet_root(&staging_dir)?;
+            let pet = self.install_pet_dir(&pet_root)?;
+            self.emit_settings_updated();
+            Ok(pet)
+        })();
+        if staging_dir.exists() {
+            if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
+                warn!(
+                    path = %staging_dir.display(),
+                    error = %error,
+                    "failed to remove ccchan pet staging directory after preview install attempt"
+                );
+            }
         }
-        self.emit_settings_updated();
-        Ok(pet)
+        result
     }
 
     pub fn cancel_pet_preview(&self, staging_id: String) -> AppResult<()> {
@@ -1420,9 +1428,13 @@ async fn download_limited_pet_url(
     url: reqwest::Url,
     label: &'static str,
 ) -> AppResult<LimitedDownload> {
-    let mut response = reqwest::get(url)
+    let client = build_pet_download_client()?;
+    let mut response = client
+        .get(url)
+        .send()
         .await
         .map_err(|error| AppError::from(format!("Failed to download pet asset: {error}")))?;
+    ensure_pet_download_url_is_https(response.url())?;
     if !response.status().is_success() {
         return Err(AppError::from(format!(
             "Failed to download pet asset: HTTP {}",
@@ -1453,6 +1465,39 @@ async fn download_limited_pet_url(
         }
     }
     Ok(LimitedDownload { bytes, headers })
+}
+
+fn build_pet_download_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(PET_DOWNLOAD_TIMEOUT_SECS))
+        .redirect(reqwest::redirect::Policy::custom(
+            |attempt| match validate_pet_redirect(attempt.url(), attempt.previous().len()) {
+                Ok(()) => attempt.follow(),
+                Err(error) => attempt.error(error.to_string()),
+            },
+        ))
+        .build()
+        .map_err(|error| AppError::from(format!("Failed to create pet download client: {error}")))
+}
+
+fn validate_pet_redirect(next_url: &reqwest::Url, previous_len: usize) -> AppResult<()> {
+    if previous_len > PET_DOWNLOAD_MAX_REDIRECTS {
+        return Err(AppError::from(format!(
+            "ccchan pet download followed too many redirects: {}",
+            previous_len
+        )));
+    }
+    ensure_pet_download_url_is_https(next_url)
+}
+
+fn ensure_pet_download_url_is_https(url: &reqwest::Url) -> AppResult<()> {
+    if url.scheme() != "https" {
+        return Err(AppError::from(format!(
+            "ccchan pet downloads must stay on https:// URLs, got {}",
+            url.as_str()
+        )));
+    }
+    Ok(())
 }
 
 fn pet_image_extension_from_download(
@@ -2023,6 +2068,30 @@ mod tests {
     }
 
     #[test]
+    fn pet_download_https_guards_reject_plain_http_and_downgrades() {
+        let https = reqwest::Url::parse("https://example.invalid/pet.zip").expect("https url");
+        let http = reqwest::Url::parse("http://example.invalid/pet.zip").expect("http url");
+
+        assert!(ensure_pet_download_url_is_https(&https).is_ok());
+        assert!(ensure_pet_download_url_is_https(&http)
+            .expect_err("http download rejected")
+            .to_string()
+            .contains("https"));
+        assert!(validate_pet_redirect(&https, PET_DOWNLOAD_MAX_REDIRECTS).is_ok());
+        assert!(validate_pet_redirect(&http, 1)
+            .expect_err("http redirect rejected")
+            .to_string()
+            .contains("https"));
+        assert!(
+            validate_pet_redirect(&https, PET_DOWNLOAD_MAX_REDIRECTS + 1)
+                .expect_err("redirect limit rejected")
+                .to_string()
+                .contains("too many redirects")
+        );
+        build_pet_download_client().expect("download client builds");
+    }
+
+    #[test]
     fn merge_pet_by_source_rank_prefers_user_then_builtin_then_custom_then_codex_home() {
         let mut pets = HashMap::new();
 
@@ -2147,6 +2216,34 @@ mod tests {
             .map(|entries| entries.count())
             .unwrap_or(0);
         assert_eq!(staging_entries, 0);
+    }
+
+    #[test]
+    fn install_pet_from_preview_cleans_staging_after_install_failure() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+        let staging_dir = data_dir
+            .join("ccchan")
+            .join("pet-staging")
+            .join("stage-fail")
+            .join("pet");
+        write_minimal_pet(&staging_dir, "猫");
+
+        let error = service
+            .install_pet_from_preview("stage-fail".to_string())
+            .expect_err("invalid pet id should fail install");
+
+        assert!(error.to_string().contains("install directory"));
+        assert!(!data_dir
+            .join("ccchan")
+            .join("pet-staging")
+            .join("stage-fail")
+            .exists());
+        assert!(!data_dir.join("ccchan").join("pets").join("pet").exists());
     }
 
     #[test]
