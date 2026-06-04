@@ -248,6 +248,20 @@ describe("CCChanSettings", () => {
     });
   });
 
+  it("previews and installs a CC-Panes pet install link", async () => {
+    const installLink = "ccpanes://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp";
+    vi.mocked(window.prompt).mockReturnValue(installLink);
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: installLink });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+
   it("deletes the active user pet and saves fallback pet references", async () => {
     const settings = {
       ...DEFAULT_CCCHAN_SETTINGS,

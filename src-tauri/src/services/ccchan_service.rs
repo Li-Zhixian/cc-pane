@@ -117,7 +117,7 @@ pub struct PetInstallPreview {
     pub source_path: String,
 }
 
-struct CodexPetLink {
+struct PetInstallLink {
     name: String,
     image_url: reqwest::Url,
     description: String,
@@ -270,12 +270,12 @@ impl CCChanService {
                 error
             ))
         })?;
-        if parsed.scheme() == "codex" {
-            return self.preview_pet_from_codex_deeplink(parsed).await;
+        if matches!(parsed.scheme(), "codex" | "ccpanes") {
+            return self.preview_pet_from_install_link(parsed).await;
         }
         if parsed.scheme() != "https" {
             return Err(AppError::from(
-                "ccchan pet URL installs require an https:// zip URL or codex://pets/install link",
+                "ccchan pet URL installs require an https:// zip URL, codex://pets/install link, or ccpanes://pets/install link",
             ));
         }
         let path_ext = Path::new(parsed.path())
@@ -305,11 +305,11 @@ impl CCChanService {
         })
     }
 
-    async fn preview_pet_from_codex_deeplink(
+    async fn preview_pet_from_install_link(
         &self,
         parsed: reqwest::Url,
     ) -> AppResult<PetInstallPreview> {
-        let link = parse_codex_pet_link(&parsed)?;
+        let link = parse_pet_install_link(&parsed)?;
         let download = download_limited_pet_url(link.image_url.clone(), "Pet image").await?;
         let image_ext =
             pet_image_extension_from_download(&link.image_url, &download.headers, &download.bytes)?;
@@ -1191,28 +1191,33 @@ fn resolve_spritesheet_path(pet_dir: &Path, configured_path: &str) -> AppResult<
         .ok_or_else(|| AppError::from(format!("No spritesheet found in {}", pet_dir.display())))
 }
 
-fn parse_codex_pet_link(parsed: &reqwest::Url) -> AppResult<CodexPetLink> {
+fn parse_pet_install_link(parsed: &reqwest::Url) -> AppResult<PetInstallLink> {
+    if !matches!(parsed.scheme(), "codex" | "ccpanes") {
+        return Err(AppError::from(
+            "ccchan only supports codex://pets/install or ccpanes://pets/install pet links",
+        ));
+    }
     if parsed.host_str() != Some("pets") || parsed.path() != "/install" {
         return Err(AppError::from(
-            "ccchan only supports codex://pets/install pet links",
+            "ccchan only supports codex://pets/install or ccpanes://pets/install pet links",
         ));
     }
     let name = codex_pet_query_value(parsed, "name")
-        .ok_or_else(|| AppError::from("codex pet install link requires name="))?;
+        .ok_or_else(|| AppError::from("pet install link requires name="))?;
     let image_url = codex_pet_query_value(parsed, "imageUrl")
-        .ok_or_else(|| AppError::from("codex pet install link requires imageUrl="))?;
+        .ok_or_else(|| AppError::from("pet install link requires imageUrl="))?;
     let description = codex_pet_query_value(parsed, "description")
-        .unwrap_or_else(|| format!("{name} imported from a Codex pet link"));
+        .unwrap_or_else(|| format!("{name} imported from a pet install link"));
 
     let image_url = reqwest::Url::parse(&image_url)
-        .map_err(|error| AppError::from(format!("Invalid codex pet imageUrl: {error}")))?;
+        .map_err(|error| AppError::from(format!("Invalid pet install imageUrl: {error}")))?;
     if image_url.scheme() != "https" {
         return Err(AppError::from(
-            "codex pet install imageUrl must be an https:// URL",
+            "pet install imageUrl must be an https:// URL",
         ));
     }
 
-    Ok(CodexPetLink {
+    Ok(PetInstallLink {
         name,
         image_url,
         description,
@@ -1781,12 +1786,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_codex_pet_link_requires_https_image_url() {
+    fn parse_pet_install_link_accepts_codex_and_ccpanes_schemes() {
         let link = reqwest::Url::parse(
             "codex://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp&description=Hi",
         )
         .expect("url");
-        let parsed = parse_codex_pet_link(&link).expect("parse link");
+        let parsed = parse_pet_install_link(&link).expect("parse codex link");
 
         assert_eq!(parsed.name, "Doro");
         assert_eq!(
@@ -1795,11 +1800,23 @@ mod tests {
         );
         assert_eq!(parsed.description, "Hi");
 
+        let ccpanes = reqwest::Url::parse(
+            "ccpanes://pets/install?name=Homie&imageUrl=https%3A%2F%2Fexample.invalid%2Fhomie.png",
+        )
+        .expect("url");
+        let parsed = parse_pet_install_link(&ccpanes).expect("parse ccpanes link");
+        assert_eq!(parsed.name, "Homie");
+        assert_eq!(
+            parsed.image_url.as_str(),
+            "https://example.invalid/homie.png"
+        );
+        assert_eq!(parsed.description, "Homie imported from a pet install link");
+
         let insecure = reqwest::Url::parse(
             "codex://pets/install?name=Doro&imageUrl=http://example.invalid/doro.webp",
         )
         .expect("url");
-        assert!(parse_codex_pet_link(&insecure)
+        assert!(parse_pet_install_link(&insecure)
             .expect_err("http imageUrl rejected")
             .to_string()
             .contains("https"));

@@ -74,7 +74,7 @@ The ccchan settings panel supports:
 
 - Folder install: selects a folder containing `pet.json`, or a parent folder with exactly one direct child containing `pet.json`; multiple direct pet children are rejected to avoid installing the wrong pet.
 - Zip install: extracts a zip with safe paths only, then installs the detected pet folder.
-- URL install: downloads an HTTPS zip package, or imports an official `codex://pets/install?name=&imageUrl=` link pasted into settings by downloading the HTTPS `imageUrl` into a single-frame ccchan pet package. Both paths stage into `<data-dir>/ccchan/pet-staging`, preview metadata, then install after confirmation.
+- URL install: downloads an HTTPS zip package, or imports a pasted `codex://pets/install?name=&imageUrl=` / `ccpanes://pets/install?name=&imageUrl=` link by downloading the HTTPS `imageUrl` into a single-frame ccchan pet package. Both paths stage into `<data-dir>/ccchan/pet-staging`, preview metadata, then install after confirmation.
 - Awesome Codex Pet catalog: loads `awesome-codex-pet`'s public `pets.json`, supports search by name, author, category, license, or slug, stages the selected pet from GitHub raw assets, previews metadata, then installs after confirmation.
 - User pet management: lists and deletes pets installed under `<data-dir>/ccchan/pets`; bundled and Codex Home pets are read-only from this UI.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
@@ -83,7 +83,7 @@ URL installs require `https://`, stream remote downloads with a 30 MB cap, cap z
 
 Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.com/legeling/awesome-codex-pet/main`, validate catalog slugs and relative spritesheet paths, and use the same staging/install flow as zip and URL installs.
 
-Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import these links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app; if direct OS deep links are added later they should use a CC-Panes-owned scheme such as `ccpanes://`.
+Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. The settings URL installer also accepts `ccpanes://pets/install?name=&imageUrl=` as a CC-Panes-owned paste/import format; OS-level protocol registration for direct clicks is not enabled yet and should be implemented with `ccpanes://`, not `codex://`, if added later.
 
 ## Runtime Status
 
@@ -119,7 +119,7 @@ Windows-host-required:
 - Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning.
 - Verify Claude Code and Codex chat launch for local Windows roles and explicit WSL roles, including the absolute WSL remote path error state, successful remote path startup, and hook files written to the mapped host project path.
 - Verify status updates for Claude and Codex through project hooks when supported, and through terminal/session fallback when hooks are degraded or unsupported.
-- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, Codex Home/custom directories, and the Awesome Codex Pet catalog.
+- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, Codex Home/custom directories, and the Awesome Codex Pet catalog.
 
 Commit convention:
 

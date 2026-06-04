@@ -217,7 +217,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   }
 
   async function installFromUrl() {
-    const url = window.prompt("输入 HTTPS 桌宠 zip URL 或 codex://pets/install 链接");
+    const url = window.prompt("粘贴 HTTPS 桌宠 zip URL、codex://pets/install 或 ccpanes://pets/install 链接");
     if (!url) return;
     try {
       const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_url", { url });
@@ -667,7 +667,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </div>
         )}
         <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-          支持 Codex pet 标准结构：pet.json + spritesheet.webp/png/gif；URL 安装支持 HTTPS zip 和官方 codex://pets/install 链接。
+          支持 Codex pet 标准结构：pet.json + spritesheet.webp/png/gif；粘贴安装支持 HTTPS zip、官方 codex://pets/install 和 CC-Panes 自有 ccpanes://pets/install 链接。
         </p>
       </div>
 
