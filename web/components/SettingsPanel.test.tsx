@@ -116,7 +116,7 @@ describe("SettingsPanel ccchan validation", () => {
 
     expect(settingsService.updateSettings).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("需要填写 WSL 远端路径"));
-    expect(screen.getByText(/WSL 角色需要填写远端路径/)).toBeInTheDocument();
+    expect(screen.getByText(/WSL 角色需要填写以 \/ 开头的绝对远端路径/)).toBeInTheDocument();
   });
 
   it("saves a WSL ccchan role after a Linux remote path is configured", async () => {

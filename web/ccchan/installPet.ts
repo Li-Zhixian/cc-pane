@@ -22,13 +22,21 @@ export async function confirmCCChanAction(
   });
 }
 
+export async function cancelCCChanPetPreview(stagingId: string): Promise<void> {
+  if (!stagingId.trim()) return;
+  await invoke("cancel_ccchan_pet_preview", { stagingId });
+}
+
 export async function previewAndInstallCCChanPetUrl(url: string, load: () => Promise<void>) {
   const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_url", { url });
   const confirmed = await confirmCCChanAction(
     `安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`,
     { okLabel: "安装" },
   );
-  if (!confirmed) return false;
+  if (!confirmed) {
+    await cancelCCChanPetPreview(preview.stagingId);
+    return false;
+  }
   await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
   await load();
   toast.success("桌宠已安装");

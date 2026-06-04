@@ -6,6 +6,10 @@ if (typeof window !== "undefined") {
   window.__TAURI_INTERNALS__ = {};
 }
 
+if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.scrollTo) {
+  HTMLElement.prototype.scrollTo = vi.fn();
+}
+
 // 每个测试后自动清理 DOM
 afterEach(() => {
   cleanup();

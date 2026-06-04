@@ -17,12 +17,15 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const outputRef = useRef<HTMLDivElement>(null);
-  const startingRef = useRef(false);
   const activeRole = settings.roles.find((role) => role.id === settings.activeRoleId) ?? settings.roles[0];
   const roleSessionKey = activeRole
     ? `${activeRole.id}:${activeRole.aiEngine}:${activeRole.systemPrompt}:${activeRole.runtimeKind}:${activeRole.wslRemotePath ?? ""}:${activeRole.wslDistro ?? ""}`
     : "default";
+  const outputRef = useRef<HTMLDivElement>(null);
+  const startingRef = useRef(false);
+  const latestRoleSessionKeyRef = useRef(roleSessionKey);
+  const mountedRef = useRef(true);
+  const [startupRetryToken, setStartupRetryToken] = useState(0);
   const previousRoleSessionKeyRef = useRef(roleSessionKey);
   const aiEngine = activeRole?.aiEngine ?? settings.aiEngine;
   const roleName = activeRole?.name ?? "默认助手";
@@ -30,6 +33,17 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   const runtimeKind = activeRole?.runtimeKind ?? "local";
   const wslRemotePath = activeRole?.wslRemotePath ?? null;
   const wslDistro = activeRole?.wslDistro ?? null;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    latestRoleSessionKeyRef.current = roleSessionKey;
+  }, [roleSessionKey]);
 
   useEffect(() => {
     if (previousRoleSessionKeyRef.current === roleSessionKey) return;
@@ -41,10 +55,9 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   }, [onSessionIdChange, roleSessionKey, sessionId]);
 
   useEffect(() => {
-    let cancelled = false;
-
     async function ensureSession() {
       if (sessionId || startingRef.current) return;
+      const requestedRoleSessionKey = roleSessionKey;
       startingRef.current = true;
       setStarting(true);
       setError(null);
@@ -56,20 +69,27 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
           wslRemotePath,
           wslDistro,
         });
-        if (!cancelled) onSessionIdChange(nextSessionId);
+        if (mountedRef.current && latestRoleSessionKeyRef.current === requestedRoleSessionKey) {
+          onSessionIdChange(nextSessionId);
+          return;
+        }
+        void invoke("stop_ccchan_chat", { sessionId: nextSessionId }).catch(() => {});
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (mountedRef.current && latestRoleSessionKeyRef.current === requestedRoleSessionKey) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         startingRef.current = false;
-        if (!cancelled) setStarting(false);
+        if (!mountedRef.current) return;
+        setStarting(false);
+        if (latestRoleSessionKeyRef.current !== requestedRoleSessionKey) {
+          setStartupRetryToken((current) => current + 1);
+        }
       }
     }
 
     void ensureSession();
-    return () => {
-      cancelled = true;
-    };
-  }, [aiEngine, onSessionIdChange, runtimeKind, sessionId, systemPrompt, wslDistro, wslRemotePath]);
+  }, [aiEngine, onSessionIdChange, roleSessionKey, runtimeKind, sessionId, startupRetryToken, systemPrompt, wslDistro, wslRemotePath]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;

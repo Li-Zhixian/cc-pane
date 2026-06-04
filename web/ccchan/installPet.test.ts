@@ -44,6 +44,7 @@ describe("previewAndInstallCCChanPetUrl", () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
       if (cmd === "preview_ccchan_pet_from_url") return Promise.resolve(petPreview);
       if (cmd === "install_ccchan_pet_from_preview") return Promise.resolve(undefined);
+      if (cmd === "cancel_ccchan_pet_preview") return Promise.resolve(undefined);
       return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
     });
     vi.mocked(confirm).mockResolvedValue(true);
@@ -69,7 +70,7 @@ describe("previewAndInstallCCChanPetUrl", () => {
     expect(load).toHaveBeenCalledOnce();
   });
 
-  it("keeps the preview staged when the user cancels", async () => {
+  it("cancels the staged preview when the user cancels", async () => {
     vi.mocked(confirm).mockResolvedValue(false);
     const load = vi.fn(() => Promise.resolve());
 
@@ -79,6 +80,7 @@ describe("previewAndInstallCCChanPetUrl", () => {
       url: "ccpanes://pets/install?name=Doro",
     });
     expect(invoke).not.toHaveBeenCalledWith("install_ccchan_pet_from_preview", expect.anything());
+    expect(invoke).toHaveBeenCalledWith("cancel_ccchan_pet_preview", { stagingId: "stage-1" });
     expect(load).not.toHaveBeenCalled();
   });
 });

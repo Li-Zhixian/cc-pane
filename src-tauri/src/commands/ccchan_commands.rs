@@ -211,6 +211,15 @@ pub fn install_ccchan_pet_from_preview(
 }
 
 #[tauri::command]
+pub fn cancel_ccchan_pet_preview(
+    service: State<'_, Arc<CCChanService>>,
+    staging_id: String,
+) -> AppResult<()> {
+    debug!("cmd::cancel_ccchan_pet_preview");
+    service.cancel_pet_preview(staging_id)
+}
+
+#[tauri::command]
 pub fn install_ccchan_pet_from_path(
     service: State<'_, Arc<CCChanService>>,
     path: String,

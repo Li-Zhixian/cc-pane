@@ -14,13 +14,15 @@ The `ccchan` settings block keeps legacy fields for compatibility and adds role 
 
 On load, missing role fields are migrated into a `default` role. Selecting a role synchronizes `aiEngine` and `defaultPetId` so existing code paths remain compatible.
 
-When ccchan chat is already open, changing the active role, AI engine, or role system prompt stops the old chat PTY and starts a new session with the updated role prompt. Renaming a role does not restart the session.
+When ccchan chat is already open, changing the active role, AI engine, or role system prompt stops the old chat PTY and starts a new session with the updated role prompt. If a previous startup finishes after the user already switched roles, ccchan stops that stale PTY and retries the newest role instead of leaving chat stuck without a frontend session. Renaming a role does not restart the session.
 
 The mascot context menu lists role presets when more than one role exists, so users can switch ccchan role, pet, and engine directly from the desktop pet without opening settings.
 
 Saving ccchan settings emits `ccchan:settings-updated`, so both the main window status bar and the separate ccchan WebView reload the latest role and pet list after settings changes, pet installs, and user pet deletion. Global settings saves use the same ccchan synchronization path, and the status bar mirrors fresh ccchan settings back into the global settings store so later saves do not overwrite mascot-only updates. Changing `windowVisible` through settings also calls the native show/hide command before persisting the new visible state. The settings save path rejects WSL roles without an absolute Linux remote path, so invalid WSL roles fail before the chat launcher is reached.
 
 Settings include quick role templates for Claude local, Codex local, Claude WSL, Codex WSL, reviewer, and executor roles. WSL role templates preserve the current role's WSL path/distro when available, and the settings UI warns when a WSL role is missing the required remote path.
+
+The WSL role editor can fill the active role from the currently selected workspace project. It prefers the project's explicit `wslRemotePath`, accepts already-Linux paths such as `/mnt/d/...`, converts Windows drive paths or WSL UNC paths with the same `toWslPath` helper used by workspace launches, and copies the workspace WSL distro when one is configured.
 
 Role chat runtime supports `local` and explicit `wsl`. WSL chat requires a role-level `wslRemotePath` that starts with `/`; `~` paths are rejected because the Windows host must map the path to either a drive path like `D:\...` or a WSL UNC path like `\\wsl.localhost\<distro>\...` before writing project hooks. `wslDistro` is optional and falls back to the default distro. This is intentionally explicit so ccchan chat can run Claude Code or Codex from the same WSL project path the user expects, instead of silently guessing from the host data directory.
 
@@ -77,11 +79,14 @@ The ccchan settings panel supports:
 - URL install: downloads an HTTPS zip package, or imports a pasted `codex://pets/install?name=&imageUrl=` / `ccpanes://pets/install?name=&imageUrl=` link by downloading the HTTPS `imageUrl` into a single-frame ccchan pet package. Both paths stage into `<data-dir>/ccchan/pet-staging`, preview metadata, then install after confirmation.
 - Awesome Codex Pet catalog: loads `awesome-codex-pet`'s public `pets.json`, supports search by name, author, category, license, or slug, stages the selected pet from GitHub raw assets, previews metadata, then installs after confirmation.
 - User pet management: lists and deletes pets installed under `<data-dir>/ccchan/pets`; bundled and Codex Home pets are read-only from this UI.
+- Custom directory source management: users can either type one read-only directory per line or use a directory picker to append another pet source, so local Codex Home mirrors, WSL UNC folders, and manually curated community pet folders can be added without hand-copying paths.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
 URL installs require `https://`, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
 
 Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.com/legeling/awesome-codex-pet/main`, validate catalog slugs and relative spritesheet paths, and use the same staging/install flow as zip and URL installs.
+
+URL, zip, and Awesome catalog previews create a staging directory under `<data-dir>/ccchan/pet-staging`; successful installs remove that staging directory, and cancelled confirmation dialogs call `cancel_ccchan_pet_preview` to remove the staged preview instead of leaving abandoned packages behind.
 
 Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. CC-Panes registers its own `ccpanes://` desktop scheme through Tauri's deep-link and single-instance plugins; `ccpanes://pets/install?name=&imageUrl=` opens/focuses the main window, switches to ccchan settings, previews the pet, asks for confirmation, then installs through the same staging flow as pasted URL installs.
 

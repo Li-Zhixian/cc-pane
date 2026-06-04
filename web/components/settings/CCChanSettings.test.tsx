@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import CCChanSettings from "./CCChanSettings";
 import { DEFAULT_CCCHAN_SETTINGS, useCCChanStore } from "@/stores/useCCChanStore";
+import { useWorkspacesStore } from "@/stores/useWorkspacesStore";
 import type { AwesomeCodexPetEntry, CCChanSettings as CCChanSettingsValue, PetMeta } from "@/ccchan/types";
 
 vi.mock("sonner", () => ({
@@ -90,6 +91,12 @@ describe("CCChanSettings", () => {
       loading: false,
       loaded: true,
     });
+    useWorkspacesStore.setState({
+      workspaces: [],
+      expandedWorkspaceId: null,
+      expandedProjectId: null,
+      loading: false,
+    });
     vi.mocked(invoke).mockImplementation((cmd, args) => {
       if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
       if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
@@ -109,6 +116,10 @@ describe("CCChanSettings", () => {
         }));
       }
       if (cmd === "install_ccchan_pet_from_preview") {
+        expect(args).toEqual({ stagingId: "stage-1" });
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "cancel_ccchan_pet_preview") {
         expect(args).toEqual({ stagingId: "stage-1" });
         return Promise.resolve(undefined);
       }
@@ -167,6 +178,84 @@ describe("CCChanSettings", () => {
     expect(next.roles.find((role) => role.id === wslRole.id)?.wslRemotePath).toBe("/mnt/d/my-project/cc-pane");
   });
 
+  it("fills the active WSL role path from the selected workspace project", async () => {
+    const wslRole = {
+      ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+      id: "claude-wsl",
+      name: "Claude WSL 助手",
+      aiEngine: "claude" as const,
+      runtimeKind: "wsl" as const,
+      wslRemotePath: null,
+      wslDistro: null,
+    };
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: wslRole.id,
+      roles: [...DEFAULT_CCCHAN_SETTINGS.roles, wslRole],
+    };
+    useWorkspacesStore.setState({
+      expandedWorkspaceId: "ws-1",
+      expandedProjectId: "project-1",
+      workspaces: [{
+        id: "ws-1",
+        name: "ccpanes",
+        createdAt: "2026-06-04T00:00:00Z",
+        path: "D:\\my-project",
+        wsl: { distro: "Ubuntu-24.04", remotePath: "/mnt/d/my-project" },
+        projects: [{
+          id: "project-1",
+          path: "D:\\my-project\\cc-pane",
+        }],
+      }],
+    });
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "使用当前项目路径" }));
+
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    const nextRole = next.roles.find((role) => role.id === wslRole.id);
+    expect(nextRole?.wslRemotePath).toBe("/mnt/d/my-project/cc-pane");
+    expect(nextRole?.wslDistro).toBe("Ubuntu-24.04");
+  });
+
+  it("uses an already-Linux selected project path for the active WSL role", async () => {
+    const wslRole = {
+      ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+      id: "codex-wsl",
+      name: "Codex WSL 助手",
+      aiEngine: "codex" as const,
+      runtimeKind: "wsl" as const,
+      wslRemotePath: null,
+      wslDistro: null,
+    };
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: wslRole.id,
+      roles: [...DEFAULT_CCCHAN_SETTINGS.roles, wslRole],
+    };
+    useWorkspacesStore.setState({
+      expandedWorkspaceId: "ws-1",
+      expandedProjectId: "project-1",
+      workspaces: [{
+        id: "ws-1",
+        name: "ccpanes",
+        createdAt: "2026-06-04T00:00:00Z",
+        projects: [{
+          id: "project-1",
+          path: "/mnt/d/my-project/cc-pane",
+        }],
+      }],
+    });
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "使用当前项目路径" }));
+
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    expect(next.roles.find((role) => role.id === wslRole.id)?.wslRemotePath).toBe("/mnt/d/my-project/cc-pane");
+  });
+
   it("loads, searches, and installs an Awesome Codex Pet catalog entry", async () => {
     renderSettings();
     await waitForInitialLoad();
@@ -209,6 +298,31 @@ describe("CCChanSettings", () => {
       );
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_path", { path: "/home/dev/pets/doro" });
     });
+  });
+
+  it("adds a selected directory as a read-only custom pet source", async () => {
+    vi.mocked(open).mockResolvedValue("/home/dev/.codex/pets");
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      customPetDirs: ["/mnt/d/shared-pets"],
+    };
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "添加目录" }));
+
+    await waitFor(() => {
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({
+        directory: true,
+        multiple: false,
+        title: "选择额外 cc酱宠物目录",
+      }));
+    });
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    expect(next.customPetDirs).toEqual([
+      "/mnt/d/shared-pets",
+      "/home/dev/.codex/pets",
+    ]);
   });
 
   it("previews a selected pet zip and installs it from staging", async () => {
@@ -334,5 +448,6 @@ describe("CCChanSettings", () => {
       expect(confirm).toHaveBeenCalled();
     });
     expect(invoke).not.toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    expect(invoke).toHaveBeenCalledWith("cancel_ccchan_pet_preview", { stagingId: "stage-1" });
   });
 });

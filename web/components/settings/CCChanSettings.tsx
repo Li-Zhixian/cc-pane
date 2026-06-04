@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CCCHAN_ROLE_PROMPT, FALLBACK_PET, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
-import { confirmCCChanAction, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
+import { useWorkspacesStore } from "@/stores/useWorkspacesStore";
+import { cancelCCChanPetPreview, confirmCCChanAction, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
+import { toWslPath } from "@/utils";
 import type {
   AwesomeCodexPetEntry,
   CCChanPetInstallPreview,
@@ -96,6 +98,13 @@ const ROLE_TEMPLATES: Array<{
   },
 ];
 
+function resolveWslTargetPath(path?: string | null): string | null {
+  const trimmed = path?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("/")) return trimmed;
+  return toWslPath(trimmed);
+}
+
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
@@ -103,8 +112,32 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   const [awesomeQuery, setAwesomeQuery] = useState("");
   const [awesomeLoading, setAwesomeLoading] = useState(false);
   const [awesomeInstallSlug, setAwesomeInstallSlug] = useState<string | null>(null);
+  const selectedWorkspace = useWorkspacesStore((state) => state.selectedWorkspace());
+  const selectedProject = useWorkspacesStore((state) => state.selectedProject());
   const petOptions = pets.length > 0 ? pets : [FALLBACK_PET];
   const activeRole = value.roles.find((role) => role.id === value.activeRoleId) ?? value.roles[0];
+  const currentWslTarget = useMemo(() => {
+    const distro = selectedWorkspace?.wsl?.distro?.trim() || null;
+    const projectPath = resolveWslTargetPath(selectedProject?.wslRemotePath)
+      || resolveWslTargetPath(selectedProject?.path);
+    if (projectPath) {
+      return {
+        path: projectPath,
+        distro,
+        label: selectedProject?.alias || selectedProject?.path.split(/[\\/]/).filter(Boolean).pop() || "当前项目",
+      };
+    }
+    const workspacePath = resolveWslTargetPath(selectedWorkspace?.wsl?.remotePath)
+      || resolveWslTargetPath(selectedWorkspace?.path);
+    if (workspacePath) {
+      return {
+        path: workspacePath,
+        distro,
+        label: selectedWorkspace?.alias || selectedWorkspace?.name || "当前工作空间",
+      };
+    }
+    return null;
+  }, [selectedProject, selectedWorkspace]);
   const userPets = petOptions.filter((pet) => pet.source === "user");
   const filteredAwesomePets = useMemo(() => {
     const query = awesomeQuery.trim().toLowerCase();
@@ -133,6 +166,14 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   function updateRole(roleId: string, patch: Partial<CCChanRolePreset>) {
     const roles = value.roles.map((role) => role.id === roleId ? { ...role, ...patch } : role);
     onChange(normalizeCCChanSettings({ ...value, roles }));
+  }
+
+  function useCurrentWslTargetForActiveRole() {
+    if (!activeRole || !currentWslTarget) return;
+    updateRole(activeRole.id, {
+      wslRemotePath: currentWslTarget.path,
+      wslDistro: currentWslTarget.distro ?? activeRole.wslDistro,
+    });
   }
 
   function setActiveRole(roleId: string) {
@@ -207,7 +248,10 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
         `安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`,
         { okLabel: "安装" },
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        await cancelCCChanPetPreview(preview.stagingId);
+        return;
+      }
       if (directory) {
         await invoke("install_ccchan_pet_from_path", { path: selected });
       } else {
@@ -218,6 +262,17 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     } catch (error) {
       toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  async function addCustomPetDir() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择额外 cc酱宠物目录",
+    });
+    if (typeof selected !== "string") return;
+    update("customPetDirs", [...value.customPetDirs, selected]);
+    toast.success("已添加额外宠物目录，保存后生效");
   }
 
   async function installFromUrl() {
@@ -300,7 +355,10 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
         `安装 Awesome Codex Pet "${preview.pet.displayName}" (${preview.pet.id})？`,
         { okLabel: "安装" },
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        await cancelCCChanPetPreview(preview.stagingId);
+        return;
+      }
       await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
       await load();
       toast.success("桌宠已安装");
@@ -445,7 +503,18 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
             <div className="flex flex-col gap-2">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="flex flex-col gap-1">
-                  <Label>WSL 远端路径</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>WSL 远端路径</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={!currentWslTarget}
+                      onClick={useCurrentWslTargetForActiveRole}
+                    >
+                      使用当前项目路径
+                    </Button>
+                  </div>
                   <input
                     value={activeRole.wslRemotePath ?? ""}
                     placeholder="/mnt/d/my-project/cc-pane"
@@ -468,6 +537,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
               {!activeRole.wslRemotePath?.trim() && (
                 <p className="m-0 rounded-md border px-2 py-1 text-[11px]" style={{ borderColor: "var(--app-warning-border, #b7791f)", color: "var(--app-warning-text, #f6ad55)" }}>
                   WSL 角色需要填写以 / 开头的绝对远端路径，否则 cc酱 chat 启动时会被后端拒绝。
+                  {currentWslTarget ? ` 可直接使用“${currentWslTarget.label}”的 ${currentWslTarget.path}。` : " 请选择一个可转换为 WSL 路径的项目或配置工作空间 WSL 路径。"}
                 </p>
               )}
             </div>
@@ -576,7 +646,12 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </Button>
         </div>
         <div className="flex flex-col gap-1">
-          <Label>额外宠物目录</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label>额外宠物目录</Label>
+            <Button type="button" size="sm" variant="ghost" onClick={() => void addCustomPetDir()}>
+              添加目录
+            </Button>
+          </div>
           <textarea
             value={value.customPetDirs.join("\n")}
             placeholder={"每行一个目录，例如：\n/mnt/d/my-pets\n\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\.codex\\pets"}

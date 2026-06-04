@@ -379,12 +379,8 @@ impl CCChanService {
     }
 
     pub fn install_pet_from_preview(&self, staging_id: String) -> AppResult<PetMeta> {
-        if staging_id.trim().is_empty() {
-            return Err(AppError::from("ccchan pet preview staging id is required"));
-        }
-        let staging_dir = self
-            .pet_staging_dir()
-            .join(sanitize_path_segment(&staging_id));
+        let staging_id = sanitize_existing_staging_id(&staging_id)?;
+        let staging_dir = self.pet_staging_dir().join(staging_id);
         let pet_root = find_pet_root(&staging_dir)?;
         let pet = self.install_pet_dir(&pet_root)?;
         if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
@@ -396,6 +392,24 @@ impl CCChanService {
         }
         self.emit_settings_updated();
         Ok(pet)
+    }
+
+    pub fn cancel_pet_preview(&self, staging_id: String) -> AppResult<()> {
+        if staging_id.trim().is_empty() {
+            return Ok(());
+        }
+        let staging_id = sanitize_existing_staging_id(&staging_id)?;
+        let staging_dir = self.pet_staging_dir().join(staging_id);
+        if !staging_dir.exists() {
+            return Ok(());
+        }
+        std::fs::remove_dir_all(&staging_dir).map_err(|error| {
+            AppError::from(format!(
+                "Failed to remove ccchan pet staging directory {}: {}",
+                staging_dir.display(),
+                error
+            ))
+        })
     }
 
     pub fn install_pet_from_path(&self, path: String) -> AppResult<PetMeta> {
@@ -1471,6 +1485,18 @@ fn sanitized_pet_dir_name(pet_id: &str) -> AppResult<String> {
     Ok(dir_name)
 }
 
+fn sanitize_existing_staging_id(staging_id: &str) -> AppResult<String> {
+    let trimmed = staging_id.trim();
+    let sanitized = sanitize_path_segment(trimmed);
+    if sanitized.is_empty() || sanitized != trimmed {
+        return Err(AppError::from(format!(
+            "Invalid ccchan pet preview staging id: {}",
+            staging_id
+        )));
+    }
+    Ok(sanitized)
+}
+
 fn safe_relative_pet_path(value: &str) -> AppResult<PathBuf> {
     let path = Path::new(value);
     if path.is_absolute()
@@ -1956,6 +1982,35 @@ mod tests {
             .map(|entries| entries.count())
             .unwrap_or(0);
         assert_eq!(staging_entries, 0);
+    }
+
+    #[test]
+    fn cancel_pet_preview_rejects_unsafe_staging_ids() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+        let staging_dir = data_dir.join("ccchan").join("pet-staging").join("stage-1");
+        std::fs::create_dir_all(&staging_dir).expect("create staging");
+        std::fs::write(staging_dir.join("pet.json"), b"{}").expect("write staging file");
+
+        let error = service
+            .cancel_pet_preview("stage-1/../../escape".to_string())
+            .expect_err("unsafe staging id should be rejected");
+        assert!(error
+            .to_string()
+            .contains("Invalid ccchan pet preview staging id"));
+
+        assert!(
+            staging_dir.exists(),
+            "unsanitized sibling path should not be removed"
+        );
+        service
+            .cancel_pet_preview("stage-1".to_string())
+            .expect("cancel preview");
+        assert!(!staging_dir.exists());
     }
 
     #[test]
