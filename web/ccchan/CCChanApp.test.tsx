@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { CCChanApp } from "./CCChanApp";
 import { DEFAULT_CCCHAN_SETTINGS, FALLBACK_PET, useCCChanStore } from "@/stores/useCCChanStore";
 import { useTerminalStatusStore } from "@/stores/useTerminalStatusStore";
@@ -27,6 +28,7 @@ describe("CCChanApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listen).mockResolvedValue(() => {});
+    vi.mocked(getCurrentWebview().listen).mockResolvedValue(() => {});
     useCCChanStore.setState({
       settings: DEFAULT_CCCHAN_SETTINGS,
       pets: [FALLBACK_PET],
@@ -108,6 +110,55 @@ describe("CCChanApp", () => {
     await userEvent.click(screen.getByRole("button", { name: "Focus session focused-session" }));
 
     expect(emitTo).toHaveBeenCalledWith("main", "ccchan:focus-session", { sessionId: "focused-session" });
+  });
+
+  it("updates the pet state from terminal status events", async () => {
+    let terminalStatusHandler: ((event: { payload: TerminalStatusInfo }) => void) | null = null;
+    vi.mocked(getCurrentWebview().listen).mockImplementation(async (eventName, handler) => {
+      if (eventName === "terminal-status") {
+        terminalStatusHandler = handler as (event: { payload: TerminalStatusInfo }) => void;
+      }
+      return () => {};
+    });
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+
+    render(<CCChanApp />);
+
+    await waitFor(() => {
+      expect(terminalStatusHandler).toBeTruthy();
+      expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "idle");
+    });
+
+    act(() => {
+      terminalStatusHandler?.({
+        payload: {
+          sessionId: "event-session",
+          status: "waitingInput",
+          lastOutputAt: 1000,
+          updatedAt: 1000,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "waiting");
+    });
+
+    act(() => {
+      terminalStatusHandler?.({
+        payload: {
+          sessionId: "event-session",
+          status: "toolRunning",
+          lastOutputAt: 2000,
+          updatedAt: 2000,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "working");
+    });
   });
 
   it("keeps the chat panel mounted after closing and replays hidden output on reopen", async () => {
