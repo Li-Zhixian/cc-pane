@@ -169,6 +169,59 @@ describe("CCChanApp", () => {
     });
   });
 
+  it("falls back to terminal status after a hook event bubble expires", async () => {
+    const handlers: {
+      ccchanEvent?: (event: { payload: { kind: "task-complete"; sessionId: string; title?: string } }) => void;
+    } = {};
+    vi.mocked(listen).mockImplementation((eventName, handler) => {
+      if (eventName === "ccchan-event") {
+        handlers.ccchanEvent = handler as typeof handlers.ccchanEvent;
+      }
+      return Promise.resolve(() => {});
+    });
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([FALLBACK_PET]);
+      if (cmd === "get_all_terminal_status") {
+        return Promise.resolve([{
+          sessionId: "fallback-session",
+          status: "waitingInput",
+          lastOutputAt: 1000,
+          updatedAt: 1000,
+        }]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<CCChanApp />);
+
+    await waitFor(() => {
+      expect(handlers.ccchanEvent).toBeTruthy();
+      expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "waiting");
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      handlers.ccchanEvent?.({
+        payload: { kind: "task-complete", sessionId: "hook-session", title: "Hook session" },
+      });
+    });
+    expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "happy");
+    expect(screen.getByText("Hook session 完成")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(3600);
+    });
+
+    expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "waiting");
+    expect(screen.queryByText("Hook session 完成")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it("keeps the chat panel mounted after closing and replays hidden output on reopen", async () => {
     const handlers: {
       output?: (event: { payload: TerminalOutputPayload }) => void;
