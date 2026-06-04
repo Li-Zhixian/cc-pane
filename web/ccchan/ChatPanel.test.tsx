@@ -29,11 +29,33 @@ const wslRole: CCChanRolePreset = {
   wslDistro: "Ubuntu-24.04",
 };
 
+const codexLocalRole: CCChanRolePreset = {
+  id: "codex-local",
+  name: "Codex Local",
+  aiEngine: "codex",
+  petId: "doro.codex-pet",
+  systemPrompt: "Use local Codex.",
+  runtimeKind: "local",
+  wslRemotePath: null,
+  wslDistro: null,
+};
+
+const claudeWslRole: CCChanRolePreset = {
+  id: "claude-wsl",
+  name: "Claude WSL",
+  aiEngine: "claude",
+  petId: "doro.codex-pet",
+  systemPrompt: "Use Claude Code inside WSL.",
+  runtimeKind: "wsl",
+  wslRemotePath: "/mnt/d/my-project/cc-pane",
+  wslDistro: "Ubuntu-24.04",
+};
+
 function makeSettings(activeRoleId = defaultRole.id): CCChanSettings {
   return {
     ...DEFAULT_CCCHAN_SETTINGS,
     activeRoleId,
-    roles: [defaultRole, wslRole],
+    roles: [defaultRole, wslRole, codexLocalRole, claudeWslRole],
   };
 }
 
@@ -104,6 +126,62 @@ describe("ChatPanel", () => {
     expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", {
       aiEngine: "codex",
       systemPrompt: "Use Codex inside WSL.",
+      runtimeKind: "wsl",
+      wslRemotePath: "/mnt/d/my-project/cc-pane",
+      wslDistro: "Ubuntu-24.04",
+    });
+  });
+
+  it("starts a local Codex chat session with no WSL fields", async () => {
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "start_ccchan_chat") return Promise.resolve("codex-local-session");
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    render(
+      <ChatPanel
+        settings={makeSettings(codexLocalRole.id)}
+        sessionId={null}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith("codex-local-session");
+    });
+    expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", {
+      aiEngine: "codex",
+      systemPrompt: "Use local Codex.",
+      runtimeKind: "local",
+      wslRemotePath: null,
+      wslDistro: null,
+    });
+  });
+
+  it("starts a Claude WSL chat session with explicit distro and remote path", async () => {
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "start_ccchan_chat") return Promise.resolve("claude-wsl-session");
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    render(
+      <ChatPanel
+        settings={makeSettings(claudeWslRole.id)}
+        sessionId={null}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith("claude-wsl-session");
+    });
+    expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", {
+      aiEngine: "claude",
+      systemPrompt: "Use Claude Code inside WSL.",
       runtimeKind: "wsl",
       wslRemotePath: "/mnt/d/my-project/cc-pane",
       wslDistro: "Ubuntu-24.04",
