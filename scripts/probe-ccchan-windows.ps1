@@ -3,6 +3,7 @@ param(
   [string]$ProtocolScheme = "ccpanes",
   [string]$DevConfigPath = "$env:USERPROFILE\.cc-panes-dev\config.toml",
   [switch]$VerifyDrag,
+  [switch]$VerifyNativeMove,
   [switch]$VerifyTrayToggle,
   [string]$TrayTooltip = "CC-Panes [DEV]"
 )
@@ -28,13 +29,52 @@ public class CCChanWin32Probe {
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
   public const int GWL_EXSTYLE = -20;
   public const long WS_EX_TOPMOST = 0x00000008L;
   public const int SW_RESTORE = 9;
+  public const uint SWP_NOSIZE = 0x0001;
+  public const uint SWP_NOZORDER = 0x0004;
+  public const uint SWP_NOACTIVATE = 0x0010;
+  public const uint INPUT_MOUSE = 0;
+  public const uint MOUSEEVENTF_MOVE = 0x0001;
   public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
   public const uint MOUSEEVENTF_LEFTUP = 0x0004;
   public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
   public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+  public static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
+  public static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE = new IntPtr(-3);
+
+  public static void SendMouse(uint flags, int dx, int dy) {
+    INPUT[] inputs = new INPUT[1];
+    inputs[0].type = INPUT_MOUSE;
+    inputs[0].mi.dx = dx;
+    inputs[0].mi.dy = dy;
+    inputs[0].mi.mouseData = 0;
+    inputs[0].mi.dwFlags = flags;
+    inputs[0].mi.time = 0;
+    inputs[0].mi.dwExtraInfo = IntPtr.Zero;
+    SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
+  }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct INPUT {
+  public uint type;
+  public MOUSEINPUT mi;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct MOUSEINPUT {
+  public int dx;
+  public int dy;
+  public uint mouseData;
+  public uint dwFlags;
+  public uint time;
+  public IntPtr dwExtraInfo;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -51,6 +91,12 @@ public struct POINT {
   public int Y;
 }
 "@
+
+[void](
+  [CCChanWin32Probe]::SetProcessDpiAwarenessContext([CCChanWin32Probe]::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) -or
+  [CCChanWin32Probe]::SetProcessDpiAwarenessContext([CCChanWin32Probe]::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) -or
+  [CCChanWin32Probe]::SetProcessDPIAware()
+)
 
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -147,7 +193,15 @@ function Get-MascotWindow {
   param([int]$ProcessId)
 
   $windows = Get-VisibleWindowsForProcess -ProcessId $ProcessId
-  $mascot = $windows | Where-Object { $_.width -eq 120 -and $_.height -eq 120 -and $_.topMost } | Select-Object -First 1
+  $mascot = $windows |
+    Where-Object {
+      $_.topMost -and
+      $_.width -ge 90 -and $_.width -le 220 -and
+      $_.height -ge 90 -and $_.height -le 220 -and
+      [Math]::Abs($_.width - $_.height) -le 4
+    } |
+    Sort-Object @{ Expression = { [Math]::Abs($_.width - 120) + [Math]::Abs($_.height - 120) } } |
+    Select-Object -First 1
   return [pscustomobject]@{
     mascot = $mascot
     windows = $windows
@@ -484,6 +538,7 @@ function Test-CCChanDragPersistence {
 
   $originalCursor = New-Object POINT
   [void][CCChanWin32Probe]::GetCursorPos([ref]$originalCursor)
+  $configBefore = Read-CCChanConfigPosition -Path $ConfigPath
 
   $startX = [int]($InitialMascot.left + [Math]::Floor($InitialMascot.width / 2))
   $startY = [int]($InitialMascot.top + [Math]::Floor($InitialMascot.height / 2))
@@ -491,29 +546,41 @@ function Test-CCChanDragPersistence {
   $targetY = $startY + 36
 
   try {
+    [void][CCChanWin32Probe]::SetForegroundWindow($InitialMascot.hwnd)
+    Start-Sleep -Milliseconds 300
     [void][CCChanWin32Probe]::SetCursorPos($startX, $startY)
-    Start-Sleep -Milliseconds 100
-    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 100
+    Start-Sleep -Milliseconds 200
+    [CCChanWin32Probe]::SendMouse([CCChanWin32Probe]::MOUSEEVENTF_LEFTDOWN, 0, 0)
+    Start-Sleep -Milliseconds 160
     foreach ($step in 1..8) {
-      $nextX = [int]($startX + (($targetX - $startX) * $step / 8))
-      $nextY = [int]($startY + (($targetY - $startY) * $step / 8))
-      [void][CCChanWin32Probe]::SetCursorPos($nextX, $nextY)
-      Start-Sleep -Milliseconds 40
+      [CCChanWin32Probe]::SendMouse([CCChanWin32Probe]::MOUSEEVENTF_MOVE, 6, 4)
+      Start-Sleep -Milliseconds 70
     }
     Start-Sleep -Milliseconds 120
-    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [CCChanWin32Probe]::SendMouse([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0)
     Start-Sleep -Milliseconds 650
   } finally {
-    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [CCChanWin32Probe]::SendMouse([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0)
     [void][CCChanWin32Probe]::SetCursorPos($originalCursor.X, $originalCursor.Y)
   }
 
-  $afterProbe = Get-MascotWindow -ProcessId $ProcessId
-  $after = $afterProbe.mascot
-  $configPosition = Read-CCChanConfigPosition -Path $ConfigPath
-  $moved = [bool]($after -and ([Math]::Abs($after.left - $InitialMascot.left) -ge 12 -or [Math]::Abs($after.top - $InitialMascot.top) -ge 12))
-  $configMoved = [bool]($configPosition -and ([Math]::Abs($configPosition.x - $InitialMascot.left) -ge 12 -or [Math]::Abs($configPosition.y - $InitialMascot.top) -ge 12))
+  $after = $null
+  $configPosition = $null
+  $moved = $false
+  $configMoved = $false
+  $deadline = (Get-Date).AddMilliseconds(3000)
+  do {
+    Start-Sleep -Milliseconds 150
+    $afterProbe = Get-MascotWindow -ProcessId $ProcessId
+    $after = $afterProbe.mascot
+    $configPosition = Read-CCChanConfigPosition -Path $ConfigPath
+    $moved = [bool]($after -and ([Math]::Abs($after.left - $InitialMascot.left) -ge 12 -or [Math]::Abs($after.top - $InitialMascot.top) -ge 12))
+    if ($configBefore -and $configPosition) {
+      $configMoved = [bool]([Math]::Abs($configPosition.x - $configBefore.x) -ge 8 -or [Math]::Abs($configPosition.y - $configBefore.y) -ge 8)
+    } else {
+      $configMoved = [bool]($configPosition -and ([Math]::Abs($configPosition.x - $InitialMascot.left) -ge 12 -or [Math]::Abs($configPosition.y - $InitialMascot.top) -ge 12))
+    }
+  } while ((-not ($moved -and $configMoved)) -and (Get-Date) -lt $deadline)
 
   return [pscustomobject]@{
     attempted = $true
@@ -521,6 +588,60 @@ function Test-CCChanDragPersistence {
     configMoved = $configMoved
     before = $InitialMascot
     after = $after
+    configBefore = $configBefore
+    configPosition = $configPosition
+  }
+}
+
+function Test-CCChanNativeMovePersistence {
+  param(
+    [int]$ProcessId,
+    [object]$InitialMascot,
+    [string]$ConfigPath
+  )
+
+  if (-not $InitialMascot) {
+    throw "Cannot verify native move without a mascot window."
+  }
+
+  $configBefore = Read-CCChanConfigPosition -Path $ConfigPath
+  $targetX = $InitialMascot.left + 54
+  $targetY = $InitialMascot.top + 42
+  [void][CCChanWin32Probe]::SetWindowPos(
+    $InitialMascot.hwnd,
+    [IntPtr]::Zero,
+    [int]$targetX,
+    [int]$targetY,
+    0,
+    0,
+    [CCChanWin32Probe]::SWP_NOSIZE -bor [CCChanWin32Probe]::SWP_NOZORDER -bor [CCChanWin32Probe]::SWP_NOACTIVATE
+  )
+
+  $after = $null
+  $configPosition = $null
+  $moved = $false
+  $configMoved = $false
+  $deadline = (Get-Date).AddMilliseconds(5000)
+  do {
+    Start-Sleep -Milliseconds 200
+    $afterProbe = Get-MascotWindow -ProcessId $ProcessId
+    $after = $afterProbe.mascot
+    $configPosition = Read-CCChanConfigPosition -Path $ConfigPath
+    $moved = [bool]($after -and ([Math]::Abs($after.left - $InitialMascot.left) -ge 12 -or [Math]::Abs($after.top - $InitialMascot.top) -ge 12))
+    if ($configBefore -and $configPosition) {
+      $configMoved = [bool]([Math]::Abs($configPosition.x - $configBefore.x) -ge 8 -or [Math]::Abs($configPosition.y - $configBefore.y) -ge 8)
+    } else {
+      $configMoved = [bool]($configPosition -and ([Math]::Abs($configPosition.x - $InitialMascot.left) -ge 12 -or [Math]::Abs($configPosition.y - $InitialMascot.top) -ge 12))
+    }
+  } while ((-not ($moved -and $configMoved)) -and (Get-Date) -lt $deadline)
+
+  return [pscustomobject]@{
+    attempted = $true
+    moved = $moved
+    configMoved = $configMoved
+    before = $InitialMascot
+    after = $after
+    configBefore = $configBefore
     configPosition = $configPosition
   }
 }
@@ -590,6 +711,23 @@ if ($VerifyDrag) {
   $mascotInsideScreen = Test-MascotInsideScreens -Mascot $mascot -Screens $screens
 }
 
+$nativeMoveResult = $null
+if ($VerifyNativeMove) {
+  $nativeMoveResult = Test-CCChanNativeMovePersistence -ProcessId $devProcess.Id -InitialMascot $mascot -ConfigPath $DevConfigPath
+  $windowProbe = Get-MascotWindow -ProcessId $devProcess.Id
+  $windows = $windowProbe.windows
+  $mascot = $windowProbe.mascot
+  $mainProbe = Restore-MainWindowForProcess -ProcessId $devProcess.Id
+  $windows = Get-VisibleWindowsForProcess -ProcessId $devProcess.Id
+  $mainWindow = $mainProbe.main
+  if (Test-Path $DevConfigPath) {
+    $configValues = Get-Content $DevConfigPath |
+      Select-String -Pattern "windowVisible|windowX|windowY" |
+      ForEach-Object { $_.Line }
+  }
+  $mascotInsideScreen = Test-MascotInsideScreens -Mascot $mascot -Screens $screens
+}
+
 $trayToggleResult = $null
 if ($VerifyTrayToggle) {
   $trayToggleResult = Test-CCChanTrayToggle -ProcessId $devProcess.Id -InitialMascot $mascot -ConfigPath $DevConfigPath -Tooltip $TrayTooltip
@@ -608,15 +746,17 @@ if ($VerifyTrayToggle) {
 }
 
 $dragOk = (-not $VerifyDrag) -or ($dragResult -and $dragResult.moved -and $dragResult.configMoved)
+$nativeMoveOk = (-not $VerifyNativeMove) -or ($nativeMoveResult -and $nativeMoveResult.moved -and $nativeMoveResult.configMoved)
 $trayToggleOk = (-not $VerifyTrayToggle) -or ($trayToggleResult -and $trayToggleResult.hideOk -and $trayToggleResult.showOk)
 
 $result = [pscustomobject]@{
-  ok = [bool]($mascot -and $mainWindow -and $mainWindow.width -gt 300 -and $mainWindow.height -gt 300 -and $protocolMatchesDevExe -and $mascotInsideScreen -and $dragOk -and $trayToggleOk)
+  ok = [bool]($mascot -and $mainWindow -and $mainWindow.width -gt 300 -and $mainWindow.height -gt 300 -and $protocolMatchesDevExe -and $mascotInsideScreen -and $dragOk -and $nativeMoveOk -and $trayToggleOk)
   devPid = $devProcess.Id
   devPath = $devProcess.Path
   mascotWindow = $mascot
   mascotInsideScreen = $mascotInsideScreen
   dragVerification = $dragResult
+  nativeMoveVerification = $nativeMoveResult
   trayToggleVerification = $trayToggleResult
   mainWindow = $mainWindow
   visibleWindows = $windows

@@ -28,6 +28,8 @@ const WANDER_EDGE_PAD = 40;
 const WANDER_MIN_DISTANCE = 160;
 const DRAG_PERSIST_DEBOUNCE_MS = 320;
 const DRAG_IDLE_FINISH_MS = 1500;
+const POSITION_SYNC_INTERVAL_MS = 1200;
+const POSITION_SYNC_EPSILON = 1;
 
 function formatSessionTitle(sessionId: string) {
   const trimmed = sessionId.trim();
@@ -63,6 +65,7 @@ export function CCChanApp() {
   const [menuPosition, setMenuPosition] = useState<CCChanContextMenuPosition | null>(null);
   const [menuOwnsResize, setMenuOwnsResize] = useState(false);
   const [chatMounted, setChatMounted] = useState(() => expanded || Boolean(chatSessionId));
+  const [dragging, setDragging] = useState(false);
   const dragStartedAtRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
   const dragPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,7 +87,7 @@ export function CCChanApp() {
   const petState = eventState ?? eggState ?? aggregateState;
 
   useEffect(() => {
-    if (eventState || expanded || menuPosition) {
+    if (eventState || expanded || menuPosition || dragging) {
       setEggState(null);
       return;
     }
@@ -174,7 +177,7 @@ export function CCChanApp() {
       clearTimers();
       setEggState(null);
     };
-  }, [eventState, expanded, menuPosition]);
+  }, [dragging, eventState, expanded, menuPosition]);
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -272,6 +275,7 @@ export function CCChanApp() {
   useEffect(() => {
     let cancelled = false;
     let unlistenMoved: UnlistenFn | null = null;
+    let positionSyncTimer: ReturnType<typeof setInterval> | null = null;
 
     function clearDragTimers() {
       if (dragPersistTimerRef.current) clearTimeout(dragPersistTimerRef.current);
@@ -299,13 +303,13 @@ export function CCChanApp() {
       const startedAt = dragStartedAtRef.current;
       if (!startedAt) return;
       dragStartedAtRef.current = null;
+      setDragging(false);
       lastPersistedDragPhysicalRef.current = null;
       clearDragTimers();
       if (Date.now() - startedAt > 180) suppressNextClickRef.current = true;
     }
 
     function scheduleMovedPersist(physicalPos: { x: number; y: number }) {
-      if (!dragStartedAtRef.current) return;
       const lastPersisted = lastPersistedDragPhysicalRef.current;
       if (
         lastPersisted &&
@@ -319,10 +323,12 @@ export function CCChanApp() {
         dragPersistTimerRef.current = null;
         void persistDragPosition(physicalPos);
       }, DRAG_PERSIST_DEBOUNCE_MS);
-      dragFinishTimerRef.current = setTimeout(() => {
-        void persistDragPosition(physicalPos);
-        finishDrag();
-      }, DRAG_IDLE_FINISH_MS);
+      if (dragStartedAtRef.current) {
+        dragFinishTimerRef.current = setTimeout(() => {
+          void persistDragPosition(physicalPos);
+          finishDrag();
+        }, DRAG_IDLE_FINISH_MS);
+      }
     }
 
     function handleMouseUp() {
@@ -345,10 +351,35 @@ export function CCChanApp() {
       unlistenMoved = fn;
     }).catch(() => {});
 
+    positionSyncTimer = setInterval(() => {
+      if (cancelled) return;
+      void (async () => {
+        try {
+          const pos = await win.outerPosition();
+          const scale = await win.scaleFactor();
+          const logicalX = pos.x / scale;
+          const logicalY = pos.y / scale;
+          const current = useCCChanStore.getState().settings;
+          if (
+            current.windowX !== null &&
+            current.windowY !== null &&
+            Math.abs(current.windowX - logicalX) < POSITION_SYNC_EPSILON &&
+            Math.abs(current.windowY - logicalY) < POSITION_SYNC_EPSILON
+          ) {
+            return;
+          }
+          await persistDragPosition(pos);
+        } catch {
+          /* best-effort native position sync */
+        }
+      })();
+    }, POSITION_SYNC_INTERVAL_MS);
+
     window.addEventListener("mouseup", handleMouseUp);
     return () => {
       cancelled = true;
       clearDragTimers();
+      if (positionSyncTimer) clearInterval(positionSyncTimer);
       unlistenMoved?.();
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -374,6 +405,7 @@ export function CCChanApp() {
     dragFinishTimerRef.current = null;
     lastPersistedDragPhysicalRef.current = null;
     dragStartedAtRef.current = Date.now();
+    setDragging(true);
     getCurrentWindow().startDragging().catch(() => {});
   }
 

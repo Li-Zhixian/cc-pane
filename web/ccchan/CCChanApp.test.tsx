@@ -354,6 +354,65 @@ describe("CCChanApp", () => {
     vi.useRealTimers();
   });
 
+  it("persists native move events even without a preceding webview mouse down", async () => {
+    const handlers: {
+      moved?: WindowMoveHandler;
+    } = {};
+    windowMock.scaleFactor.mockResolvedValue(1.5);
+    windowMock.onMoved.mockImplementation(async (handler) => {
+      handlers.moved = handler;
+      return () => {};
+    });
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+
+    render(<CCChanApp />);
+    await waitFor(() => {
+      expect(handlers.moved).toBeTruthy();
+    });
+    vi.useFakeTimers();
+    await act(async () => {
+      handlers.moved?.({ payload: { x: -600, y: 300 } });
+      await vi.advanceTimersByTimeAsync(320);
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: -400, y: 200 });
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.windowX).toBe(-400);
+    expect(settings.windowY).toBe(200);
+    vi.useRealTimers();
+  });
+
+  it("periodically syncs native window position when move events are missed", async () => {
+    windowMock.outerPosition.mockResolvedValue({ x: -900, y: 450 });
+    windowMock.scaleFactor.mockResolvedValue(1.5);
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+      settings: {
+        ...DEFAULT_CCCHAN_SETTINGS,
+        windowX: -100,
+        windowY: 100,
+      },
+    });
+
+    vi.useFakeTimers();
+    render(<CCChanApp />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: -600, y: 300 });
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.windowX).toBe(-600);
+    expect(settings.windowY).toBe(300);
+    vi.useRealTimers();
+  });
+
   it("hides and persists visibility when the context menu exit action is used", async () => {
     render(<CCChanApp />);
 
