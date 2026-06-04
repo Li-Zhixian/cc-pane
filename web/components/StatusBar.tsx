@@ -182,6 +182,7 @@ export default function StatusBar() {
               className={`p-0.5 rounded transition-colors ${
                 isPinned ? "text-[var(--app-accent)]" : ""
               } hover:bg-[var(--app-hover)]`}
+              aria-label={t("alwaysOnTop", { ns: "sidebar" })}
               onClick={togglePin}
             >
               <Pin className={`w-3 h-3 ${isPinned ? "rotate-45" : ""} transition-transform`} />
@@ -197,6 +198,7 @@ export default function StatusBar() {
           <TooltipTrigger asChild>
             <button
               className="p-0.5 rounded transition-colors hover:bg-[var(--app-hover)]"
+              aria-label={t("miniMode", { ns: "sidebar" })}
               disabled={miniModeTransitioning}
               onClick={() => enterMiniMode()}
             >
@@ -218,6 +220,7 @@ export default function StatusBar() {
               className={`p-0.5 rounded transition-colors hover:bg-[var(--app-hover)] ${
                 ccChanVisible ? "text-[var(--app-accent)]" : ""
               }`}
+              aria-label={ccChanVisible ? "隐藏 cc酱" : "显示 cc酱"}
               onClick={() => void handleToggleCCChan()}
             >
               {ccChanVisible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -250,6 +253,7 @@ export default function StatusBar() {
               className={`p-0.5 rounded transition-colors hover:bg-[var(--app-hover)] ${
                 isDark ? "text-amber-400" : ""
               }`}
+              aria-label={isDark ? t("switchToLight", { ns: "dialogs" }) : t("switchToDark", { ns: "dialogs" })}
               onClick={toggleTheme}
             >
               {isDark ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
