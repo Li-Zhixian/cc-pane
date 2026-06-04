@@ -33,6 +33,8 @@ public struct RECT {
 }
 "@
 
+Add-Type -AssemblyName System.Windows.Forms
+
 function Get-VisibleWindowsForProcess {
   param([int]$ProcessId)
 
@@ -90,6 +92,8 @@ if (Test-Path $protocolPath) {
   $protocolItem = Get-ItemProperty -Path $protocolPath -Name "(default)" -ErrorAction SilentlyContinue
   $protocolCommand = $protocolItem."(default)"
 }
+$expectedProtocolCommand = '"' + $DevExePath + '" "%1"'
+$protocolMatchesDevExe = ($protocolCommand -eq $expectedProtocolCommand)
 
 $configValues = @()
 if (Test-Path $DevConfigPath) {
@@ -98,16 +102,52 @@ if (Test-Path $DevConfigPath) {
     ForEach-Object { $_.Line }
 }
 
+$screens = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
+  [pscustomobject]@{
+    primary = $_.Primary
+    left = $_.Bounds.Left
+    top = $_.Bounds.Top
+    width = $_.Bounds.Width
+    height = $_.Bounds.Height
+    workingLeft = $_.WorkingArea.Left
+    workingTop = $_.WorkingArea.Top
+    workingWidth = $_.WorkingArea.Width
+    workingHeight = $_.WorkingArea.Height
+  }
+}
+
+$mascotInsideScreen = $false
+if ($mascot) {
+  foreach ($screen in $screens) {
+    $screenRight = $screen.left + $screen.width
+    $screenBottom = $screen.top + $screen.height
+    if (
+      $mascot.left -ge $screen.left -and
+      $mascot.top -ge $screen.top -and
+      ($mascot.left + $mascot.width) -le $screenRight -and
+      ($mascot.top + $mascot.height) -le $screenBottom
+    ) {
+      $mascotInsideScreen = $true
+      break
+    }
+  }
+}
+
 $result = [pscustomobject]@{
-  ok = [bool]($mascot -and $mainWindow -and $protocolCommand)
+  ok = [bool]($mascot -and $mainWindow -and $protocolMatchesDevExe -and $mascotInsideScreen)
   devPid = $devProcess.Id
   devPath = $devProcess.Path
   mascotWindow = $mascot
+  mascotInsideScreen = $mascotInsideScreen
   mainWindow = $mainWindow
   visibleWindows = $windows
   protocolCommand = $protocolCommand
+  expectedProtocolCommand = $expectedProtocolCommand
+  protocolMatchesDevExe = $protocolMatchesDevExe
   configPath = $DevConfigPath
   configValues = $configValues
+  screenCount = @($screens).Count
+  screens = $screens
 }
 
 $result | ConvertTo-Json -Depth 6

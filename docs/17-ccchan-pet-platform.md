@@ -135,7 +135,7 @@ Windows-host compile/build checks run from WSL through PowerShell:
 
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo check -p cc-panes"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npm run build"`.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location 'D:\my-project\cc-pane'; npm run probe:ccchan:windows"` verifies the running dev process, a visible `120x120` topmost mascot window, a visible main window, protocol registration, and persisted dev ccchan config fields.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location 'D:\my-project\cc-pane'; npm run probe:ccchan:windows"` verifies the running dev process, a visible `120x120` topmost mascot window, a visible main window, protocol registration exactly targeting the dev exe, persisted dev ccchan config fields, monitor enumeration, and that the mascot window rectangle is inside one detected screen.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/installPet.test.ts web/components/settings/CCChanSettings.test.tsx --reporter=dot"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo test -p cc-panes-core wsl_hook_sync -- --nocapture; cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture; cargo test -p cc-cli-adapters codex -- --nocapture"` verifies WSL path mapping plus Codex Windows unsupported/WSL sync adapter behavior.
 
@@ -151,7 +151,7 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - `npm run probe:ccchan:windows` now codifies that Win32 probe so future Windows-host validation does not depend on ad hoc scripts or Unicode window-title matching.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - `C:\Users\ROG\.cc-panes-dev\config.toml` has `windowVisible = true`, `windowX = 192.12036453656117`, and `windowY = 711.6158735115789`, confirming ccchan window visibility and position persistence in dev config.
-- A Windows screen probe on 2026-06-04 found one primary monitor with bounds `0,0 1707x1067`; multi-monitor behavior remains unverified in this environment because no secondary display is currently attached.
+- An enhanced Windows screen probe on 2026-06-04 found two monitors: primary `0,0 1920x1080` and secondary `-2560,-183 1707x1067`. The same probe found the ccchan mascot at `(1155, 263)` with size `120x120`, `TopMost=true`, `mascotInsideScreen=true`, and persisted `windowX = 1154.597122755609`, `windowY = 263.0342756977823` in `C:\Users\ROG\.cc-panes-dev\config.toml`.
 - Triggering redacted protocol links did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
 - With the dev app stopped and Vite still serving `localhost:14200`, triggering a redacted pet install link cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
 - Triggering a redacted protocol link on Windows dev created a native ccchan confirmation dialog and did not show the previous `dialog.confirm not allowed` rejection.
@@ -167,7 +167,7 @@ Current WSL limitation:
 
 Windows-host-required:
 
-- Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning. Current automated evidence verifies a visible `120x120` topmost dev ccchan window and persisted visibility/position on a single-monitor Windows host; physical multi-monitor positioning still requires a host with a second display.
+- Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning. Current automated evidence verifies a visible `120x120` topmost dev ccchan window, persisted visibility/position, protocol targeting, and that the mascot is inside one detected monitor on a two-monitor Windows host; physical drag/drop movement across monitors and tray menu clicks still require manual host interaction.
 - Verify desktop protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
 - Verify local folder, zip, and trusted local-source install confirmations on Windows.
 - The backend install matrix is automated in `ccchan_service` tests and the settings UI invokes the expected folder, zip, and local-source commands in focused Vitest coverage. Remaining Windows-host work is the native dialog/manual confirmation flow, not core install semantics.
