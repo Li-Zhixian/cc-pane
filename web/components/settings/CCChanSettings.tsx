@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CCCHAN_ROLE_PROMPT, FALLBACK_PET, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
+import { previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
 import type {
   AwesomeCodexPetEntry,
   CCChanPetInstallPreview,
@@ -220,12 +221,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     const url = window.prompt("粘贴 HTTPS 桌宠 zip URL、codex://pets/install 或 ccpanes://pets/install 链接");
     if (!url) return;
     try {
-      const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_url", { url });
-      const confirmed = window.confirm(`安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`);
-      if (!confirmed) return;
-      await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
-      await load();
-      toast.success("桌宠已安装");
+      await previewAndInstallCCChanPetUrl(url, load);
     } catch (error) {
       toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
     }

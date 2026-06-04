@@ -54,10 +54,13 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { getCurrent as getCurrentDeepLinks, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { isTauriReady, waitForTauri } from "@/utils";
 import { playNotificationSound } from "@/utils/notificationSound";
 import { findPaneFocusTarget, readPaneFocusRects, type PaneFocusDirection } from "@/utils/paneFocus";
 import { registerGlobalApi } from "@/utils/globalApi";
+import { isCCPanesPetInstallLink, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
+import { useCCChanStore } from "@/stores/useCCChanStore";
 import i18n from "@/i18n";
 import type { PaneNode, Panel as PanelType, OpenTerminalOptions, SavedSession, TerminalPaneLeaf, TerminalPaneNode } from "@/types";
 
@@ -89,6 +92,20 @@ function resolveRuntimeKind(opts: Pick<OpenTerminalOptions, "ssh" | "wsl">): str
   if (opts.ssh) return "ssh";
   if (opts.wsl) return "wsl";
   return "local";
+}
+
+async function handleCCPanesDeepLinks(urls: string[]) {
+  const petInstallUrl = urls.find(isCCPanesPetInstallLink);
+  if (!petInstallUrl) return;
+  const window = getCurrentWindow();
+  await window.show().catch(() => {});
+  await window.setFocus().catch(() => {});
+  useDialogStore.getState().openSettings("ccchan");
+  try {
+    await previewAndInstallCCChanPetUrl(petInstallUrl, useCCChanStore.getState().load);
+  } catch (error) {
+    toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function focusSessionTab(sessionId: string): boolean {
@@ -225,6 +242,7 @@ function MainApp() {
     let cancelled = false;
     let unlistenFocus: (() => void) | null = null;
     let unlistenSettings: (() => void) | null = null;
+    let unlistenOpenUrl: (() => void) | null = null;
 
     listen<{ sessionId?: string }>("ccchan:focus-session", (event) => {
       if (cancelled) return;
@@ -249,10 +267,28 @@ function MainApp() {
       console.warn("ccchan settings listener failed:", error);
     });
 
+    onOpenUrl((urls) => {
+      if (!cancelled) void handleCCPanesDeepLinks(urls);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenOpenUrl = fn;
+    }).catch((error) => {
+      console.warn("ccpanes open-url listener failed:", error);
+    });
+
+    getCurrentDeepLinks()
+      .then((urls) => {
+        if (!cancelled && urls) void handleCCPanesDeepLinks(urls);
+      })
+      .catch((error) => {
+        console.warn("ccpanes current deep links failed:", error);
+      });
+
     return () => {
       cancelled = true;
       unlistenFocus?.();
       unlistenSettings?.();
+      unlistenOpenUrl?.();
     };
   }, []);
 

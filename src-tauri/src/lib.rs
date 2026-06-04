@@ -1035,6 +1035,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
@@ -1084,6 +1086,17 @@ pub fn run() {
                 "[boot] +{}ms: setup callback entered",
                 boot_t0.elapsed().as_millis()
             );
+
+            #[cfg(any(debug_assertions, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(error) = app.deep_link().register_all() {
+                    warn!(
+                        "[deep-link] failed to register configured schemes: {}",
+                        error
+                    );
+                }
+            }
 
             // ---- 提取打包的 .claude/ 配置到数据目录（Release 模式）----
             {

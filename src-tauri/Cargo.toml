@@ -61,6 +61,8 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-log = { version = "2", features = ["tracing"] }
 tauri-plugin-updater = ">=2.10"
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-single-instance = { version = "2.4.2", features = ["deep-link"] }
 # 启用 system-proxy feature，通过 Cargo feature unification
 # 让 tauri-plugin-updater 内部的 reqwest 获得读取 Windows/macOS 系统代理配置的能力
 # 注意：环境变量代理（HTTP_PROXY/HTTPS_PROXY）由 reqwest 基础的 client-proxy 提供，无需此 feature

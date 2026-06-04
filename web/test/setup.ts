@@ -45,3 +45,11 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
   revealItemInDir: vi.fn(),
 }));
+
+vi.mock("@tauri-apps/plugin-deep-link", () => ({
+  getCurrent: vi.fn(() => Promise.resolve(null)),
+  onOpenUrl: vi.fn(() => Promise.resolve(() => {})),
+  register: vi.fn(),
+  unregister: vi.fn(),
+  isRegistered: vi.fn(),
+}));

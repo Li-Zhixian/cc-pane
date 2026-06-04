@@ -83,7 +83,7 @@ URL installs require `https://`, stream remote downloads with a 30 MB cap, cap z
 
 Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.com/legeling/awesome-codex-pet/main`, validate catalog slugs and relative spritesheet paths, and use the same staging/install flow as zip and URL installs.
 
-Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. The settings URL installer also accepts `ccpanes://pets/install?name=&imageUrl=` as a CC-Panes-owned paste/import format; OS-level protocol registration for direct clicks is not enabled yet and should be implemented with `ccpanes://`, not `codex://`, if added later.
+Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. CC-Panes registers its own `ccpanes://` desktop scheme through Tauri's deep-link and single-instance plugins; `ccpanes://pets/install?name=&imageUrl=` opens/focuses the main window, switches to ccchan settings, previews the pet, asks for confirmation, then installs through the same staging flow as pasted URL installs.
 
 ## Runtime Status
 
@@ -117,9 +117,10 @@ Current WSL limitation:
 Windows-host-required:
 
 - Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning.
+- Verify `ccpanes://` protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
 - Verify Claude Code and Codex chat launch for local Windows roles and explicit WSL roles, including the absolute WSL remote path error state, successful remote path startup, and hook files written to the mapped host project path.
 - Verify status updates for Claude and Codex through project hooks when supported, and through terminal/session fallback when hooks are degraded or unsupported.
-- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, Codex Home/custom directories, and the Awesome Codex Pet catalog.
+- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, `ccpanes://pets/install` OS deep-link click, Codex Home/custom directories, and the Awesome Codex Pet catalog.
 
 Commit convention:
 
