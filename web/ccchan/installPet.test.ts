@@ -79,6 +79,28 @@ describe("previewAndInstallCCChanPetUrl", () => {
     expect(load).toHaveBeenCalledOnce();
   });
 
+  it("does not expose the preview source path in confirmation copy", async () => {
+    const load = vi.fn(() => Promise.resolve());
+    const sourcePath = "redacted-source-path";
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "preview_ccchan_pet_from_url") {
+        return Promise.resolve({
+          ...petPreview,
+          sourcePath,
+        });
+      }
+      if (cmd === "install_ccchan_pet_from_preview") return Promise.resolve(undefined);
+      if (cmd === "cancel_ccchan_pet_preview") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    await expect(previewAndInstallCCChanPetUrl(installLink("ccpanes"), load)).resolves.toBe(true);
+
+    const [message] = vi.mocked(confirm).mock.calls[0] ?? [];
+    expect(message).toBe("安装桌宠 \"Doro\" (doro)？");
+    expect(message).not.toContain(sourcePath);
+  });
+
   it("cancels the staged preview when the user cancels", async () => {
     vi.mocked(confirm).mockResolvedValue(false);
     const load = vi.fn(() => Promise.resolve());
