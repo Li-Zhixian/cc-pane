@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { toast } from "sonner";
 import CCChanSettings from "./CCChanSettings";
 import { DEFAULT_CCCHAN_SETTINGS, useCCChanStore } from "@/stores/useCCChanStore";
 import { useWorkspacesStore } from "@/stores/useWorkspacesStore";
@@ -66,6 +67,19 @@ const awesomePet: AwesomeCodexPetEntry = {
   license: "CC BY-NC 4.0",
   description: "A soft white, mint, and gold palette pet.",
 };
+
+function makeAwesomePet(index: number): AwesomeCodexPetEntry {
+  return {
+    slug: `pet-${index}--tester`,
+    name: `Pet ${index}`,
+    author: "Tester",
+    authorHandle: "tester",
+    authorUrl: "https://github.com/tester",
+    primaryCategory: index % 2 === 0 ? "Utility" : "Anime Characters",
+    license: "MIT",
+    description: `Pet ${index} description`,
+  };
+}
 
 function renderSettings(
   value: CCChanSettingsValue = DEFAULT_CCCHAN_SETTINGS,
@@ -289,6 +303,85 @@ describe("CCChanSettings", () => {
     });
   });
 
+  it("shows the Awesome Codex Pet result count and reveals more entries", async () => {
+    const entries = Array.from({ length: 13 }, (_, index) => makeAwesomePet(index + 1));
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "list_ccchan_awesome_codex_pets") return Promise.resolve(entries);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "载入目录" }));
+
+    expect(await screen.findByText("Pet 1")).toBeInTheDocument();
+    expect(screen.getByText("显示 12 / 13")).toBeInTheDocument();
+    expect(screen.queryByText("Pet 13")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "显示更多" }));
+
+    expect(screen.getByText("Pet 13")).toBeInTheDocument();
+    expect(screen.getByText("显示 13 / 13")).toBeInTheDocument();
+  });
+
+  it("reports Awesome Codex Pet catalog load failures", async () => {
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "list_ccchan_awesome_codex_pets") return Promise.reject(new Error("catalog offline"));
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "载入目录" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("载入 Awesome Codex Pet 失败: catalog offline");
+    });
+  });
+
+  it("cancels an Awesome Codex Pet preview when confirmation is declined", async () => {
+    vi.mocked(confirm).mockResolvedValue(false);
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "载入目录" }));
+    expect(await screen.findByText("Firefly")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "安装" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_awesome_codex_pet", { slug: "firefly--lingxiaotian" });
+      expect(invoke).toHaveBeenCalledWith("cancel_ccchan_pet_preview", { stagingId: "stage-1" });
+    });
+    expect(invoke).not.toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+  });
+
+  it("reports Awesome Codex Pet install failures", async () => {
+    vi.mocked(invoke).mockImplementation((cmd, args) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "list_ccchan_awesome_codex_pets") return Promise.resolve([awesomePet]);
+      if (cmd === "preview_ccchan_awesome_codex_pet") {
+        expect(args).toEqual({ slug: "firefly--lingxiaotian" });
+        return Promise.reject(new Error("raw download failed"));
+      }
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "载入目录" }));
+    expect(await screen.findByText("Firefly")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "安装" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("安装失败: raw download failed");
+    });
+  });
+
   it("previews and installs a pet folder directly from the selected path", async () => {
     vi.mocked(open).mockResolvedValue("/home/dev/pets/doro");
     renderSettings();
@@ -398,6 +491,24 @@ describe("CCChanSettings", () => {
         expect.objectContaining({ okLabel: "安装" }),
       );
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+
+  it("reports URL install preview failures", async () => {
+    vi.mocked(window.prompt).mockReturnValue("https://example.invalid/broken.zip");
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "preview_ccchan_pet_from_url") return Promise.reject(new Error("network offline"));
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("安装失败: network offline");
     });
   });
 

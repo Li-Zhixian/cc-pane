@@ -117,6 +117,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   const load = useCCChanStore((state) => state.load);
   const [awesomePets, setAwesomePets] = useState<AwesomeCodexPetEntry[]>([]);
   const [awesomeQuery, setAwesomeQuery] = useState("");
+  const [awesomeVisibleCount, setAwesomeVisibleCount] = useState(12);
   const [awesomeLoading, setAwesomeLoading] = useState(false);
   const [awesomeInstallSlug, setAwesomeInstallSlug] = useState<string | null>(null);
   const selectedWorkspace = useWorkspacesStore((state) => state.selectedWorkspace());
@@ -148,7 +149,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   const userPets = petOptions.filter((pet) => pet.source === "user");
   const filteredAwesomePets = useMemo(() => {
     const query = awesomeQuery.trim().toLowerCase();
-    const source = query
+    return query
       ? awesomePets.filter((pet) => [
           pet.name,
           pet.slug,
@@ -159,8 +160,8 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           pet.description,
         ].some((value) => value.toLowerCase().includes(query)))
       : awesomePets;
-    return source.slice(0, 12);
   }, [awesomePets, awesomeQuery]);
+  const visibleAwesomePets = filteredAwesomePets.slice(0, awesomeVisibleCount);
   const readonlyInstallablePets = petOptions.filter(isReadonlyInstallablePet);
 
   useEffect(() => {
@@ -364,6 +365,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     try {
       const entries = await invoke<AwesomeCodexPetEntry[]>("list_ccchan_awesome_codex_pets");
       setAwesomePets(entries);
+      setAwesomeVisibleCount(12);
       toast.success(`已载入 ${entries.length} 个 Awesome Codex Pet`);
     } catch (error) {
       toast.error(`载入 Awesome Codex Pet 失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -717,10 +719,29 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
                 placeholder="搜索名称、作者、分类或 license"
                 className="h-8 rounded-md px-2 text-[12px] outline-none"
                 style={selectStyle}
-                onChange={(event) => setAwesomeQuery(event.target.value)}
+                onChange={(event) => {
+                  setAwesomeQuery(event.target.value);
+                  setAwesomeVisibleCount(12);
+                }}
               />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
+                <span>
+                  显示 {Math.min(visibleAwesomePets.length, filteredAwesomePets.length)} / {filteredAwesomePets.length}
+                  {filteredAwesomePets.length !== awesomePets.length ? `，总计 ${awesomePets.length}` : ""}
+                </span>
+                {visibleAwesomePets.length < filteredAwesomePets.length && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setAwesomeVisibleCount((count) => count + 12)}
+                  >
+                    显示更多
+                  </Button>
+                )}
+              </div>
               <div className="grid max-h-72 gap-2 overflow-y-auto md:grid-cols-2">
-                {filteredAwesomePets.map((entry) => (
+                {visibleAwesomePets.map((entry) => (
                   <div
                     key={entry.slug}
                     className="flex flex-col gap-2 rounded-md border p-2 text-[12px]"
