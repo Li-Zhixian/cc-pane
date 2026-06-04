@@ -140,7 +140,10 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - A later scripted Win32 window probe on the same branch found `CC-Panes [DEV]` and `cc酱` under the dev process `77300`; the mascot window was `120x120` and `TopMost=true`.
 - After the hidden-chat lifecycle fixes, a fresh scripted Win32 probe still found the dev process `77300` with `CC-Panes [DEV]` visible and a separate `cc酱` window visible at `120x120`, positioned at `(765, 489)`, with `TopMost=true`.
 - A later ASCII-only Win32 probe on 2026-06-04 avoided Unicode title matching and enumerated windows by `cc-panes.exe` PID. It found the dev process at `D:\my-project\cc-pane\target\debug\cc-panes.exe`, a visible `120x120` topmost mascot window at `(563, 485)`, and a visible full-size main window under the same PID. A separate release process was also running, but the protocol registration still pointed to the dev executable.
+- A subsequent Win32 probe on 2026-06-04 found two `cc-panes.exe` processes: the installed release at `C:\Users\ROG\AppData\Local\cc-panes\cc-panes.exe` and the dev process at `D:\my-project\cc-pane\target\debug\cc-panes.exe`. Under the dev PID `59620`, it found `CC-Panes [DEV]` at `1724x1084` and a visible `120x120` ccchan window at `(666, 595)` with `TopMost=true`.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
+- `C:\Users\ROG\.cc-panes-dev\config.toml` has `windowVisible = true`, `windowX = 192.12036453656117`, and `windowY = 711.6158735115789`, confirming ccchan window visibility and position persistence in dev config.
+- A Windows screen probe on 2026-06-04 found one primary monitor with bounds `0,0 1707x1067`; multi-monitor behavior remains unverified in this environment because no secondary display is currently attached.
 - Triggering redacted protocol links did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
 - With the dev app stopped and Vite still serving `localhost:14200`, triggering a redacted pet install link cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
 - Triggering a redacted protocol link on Windows dev created a native ccchan confirmation dialog and did not show the previous `dialog.confirm not allowed` rejection.
@@ -150,12 +153,12 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 Current WSL limitation:
 
 - `cargo check -p cc-panes` and `cargo test -p cc-panes ccchan_ -- --nocapture` require Linux WebKit/GTK pkg-config dependencies (`glib-2.0`, `gobject-2.0`, `gio-2.0`) in this WSL environment.
-- Windows `cargo test -p cc-panes ccchan_ -- --nocapture` currently compiles the test binary but the binary exits before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; this still needs a Windows host runtime environment check separate from compile validation.
+- Windows `cargo test -p cc-panes ccchan_ -- --nocapture` currently compiles the test binary but the binary exits before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; this still needs a Windows host runtime environment check separate from compile validation. A rerun with `CARGO_TARGET_DIR=D:\my-project\cc-pane-target-ccchan-test` avoided the running dev exe lock and still reproduced `STATUS_ENTRYPOINT_NOT_FOUND` after compiling `cc_panes_lib-2777f230912660e4.exe`.
 - The external-resource catalog path was removed because it exposed nonessential remote references from the app surface.
 
 Windows-host-required:
 
-- Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning.
+- Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning. Current automated evidence verifies a visible `120x120` topmost dev ccchan window and persisted visibility/position on a single-monitor Windows host; physical multi-monitor positioning still requires a host with a second display.
 - Verify desktop protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
 - Verify local folder, zip, and trusted local-source install confirmations on Windows.
 - Verify an interactive Claude WSL chat transcript from the ccchan UI. Launch plumbing for Windows local Claude/Codex and WSL Claude/Codex has Windows dev-run evidence above; WSL Claude still needs a manual interactive chat check because the automated probe exited quickly after PTY attach.
