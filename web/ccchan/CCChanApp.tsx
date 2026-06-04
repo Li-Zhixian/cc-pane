@@ -26,6 +26,8 @@ const WANDER_SPEED_PX_PER_SEC = 110;
 const WANDER_STEP_MS = 120;
 const WANDER_EDGE_PAD = 40;
 const WANDER_MIN_DISTANCE = 160;
+const DRAG_PERSIST_DEBOUNCE_MS = 320;
+const DRAG_IDLE_FINISH_MS = 1500;
 
 function formatSessionTitle(sessionId: string) {
   const trimmed = sessionId.trim();
@@ -63,6 +65,9 @@ export function CCChanApp() {
   const [chatMounted, setChatMounted] = useState(() => expanded || Boolean(chatSessionId));
   const dragStartedAtRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
+  const dragPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragFinishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedDragPhysicalRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedPet = useMemo(
     () => pets.find((pet) => pet.id === settings.defaultPetId) ?? pets[0],
@@ -265,28 +270,88 @@ export function CCChanApp() {
   }, [settings.soundEnabled]);
 
   useEffect(() => {
-    function handleMouseUp() {
+    let cancelled = false;
+    let unlistenMoved: UnlistenFn | null = null;
+
+    function clearDragTimers() {
+      if (dragPersistTimerRef.current) clearTimeout(dragPersistTimerRef.current);
+      if (dragFinishTimerRef.current) clearTimeout(dragFinishTimerRef.current);
+      dragPersistTimerRef.current = null;
+      dragFinishTimerRef.current = null;
+    }
+
+    async function persistDragPosition(physicalPos?: { x: number; y: number }) {
+      try {
+        const win = getCurrentWindow();
+        const pos = physicalPos ?? await win.outerPosition();
+        const scale = await win.scaleFactor();
+        const logicalX = pos.x / scale;
+        const logicalY = pos.y / scale;
+        lastPersistedDragPhysicalRef.current = { x: pos.x, y: pos.y };
+        setPosition(logicalX, logicalY);
+        await invoke("move_ccchan_window", { x: logicalX, y: logicalY });
+      } catch {
+        /* drag end save best-effort */
+      }
+    }
+
+    function finishDrag() {
       const startedAt = dragStartedAtRef.current;
       if (!startedAt) return;
       dragStartedAtRef.current = null;
+      lastPersistedDragPhysicalRef.current = null;
+      clearDragTimers();
       if (Date.now() - startedAt > 180) suppressNextClickRef.current = true;
-      setTimeout(async () => {
-        try {
-          const win = getCurrentWindow();
-          const physicalPos = await win.outerPosition();
-          const scale = await win.scaleFactor();
-          const logicalX = physicalPos.x / scale;
-          const logicalY = physicalPos.y / scale;
-          setPosition(logicalX, logicalY);
-          await invoke("move_ccchan_window", { x: logicalX, y: logicalY });
-        } catch {
-          /* drag end save best-effort */
-        }
+    }
+
+    function scheduleMovedPersist(physicalPos: { x: number; y: number }) {
+      if (!dragStartedAtRef.current) return;
+      const lastPersisted = lastPersistedDragPhysicalRef.current;
+      if (
+        lastPersisted &&
+        Math.abs(lastPersisted.x - physicalPos.x) < 1 &&
+        Math.abs(lastPersisted.y - physicalPos.y) < 1
+      ) {
+        return;
+      }
+      clearDragTimers();
+      dragPersistTimerRef.current = setTimeout(() => {
+        dragPersistTimerRef.current = null;
+        void persistDragPosition(physicalPos);
+      }, DRAG_PERSIST_DEBOUNCE_MS);
+      dragFinishTimerRef.current = setTimeout(() => {
+        void persistDragPosition(physicalPos);
+        finishDrag();
+      }, DRAG_IDLE_FINISH_MS);
+    }
+
+    function handleMouseUp() {
+      if (!dragStartedAtRef.current) return;
+      clearDragTimers();
+      setTimeout(() => {
+        void persistDragPosition();
+        finishDrag();
       }, 0);
     }
 
+    const win = getCurrentWindow();
+    win.onMoved((event) => {
+      if (!cancelled) scheduleMovedPersist(event.payload);
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlistenMoved = fn;
+    }).catch(() => {});
+
     window.addEventListener("mouseup", handleMouseUp);
-    return () => window.removeEventListener("mouseup", handleMouseUp);
+    return () => {
+      cancelled = true;
+      clearDragTimers();
+      unlistenMoved?.();
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
   }, [setPosition]);
 
   async function openChat() {
@@ -303,6 +368,11 @@ export function CCChanApp() {
 
   function handleMouseDown(event: MouseEvent<HTMLButtonElement>) {
     if (event.button !== 0) return;
+    if (dragPersistTimerRef.current) clearTimeout(dragPersistTimerRef.current);
+    if (dragFinishTimerRef.current) clearTimeout(dragFinishTimerRef.current);
+    dragPersistTimerRef.current = null;
+    dragFinishTimerRef.current = null;
+    lastPersistedDragPhysicalRef.current = null;
     dragStartedAtRef.current = Date.now();
     getCurrentWindow().startDragging().catch(() => {});
   }

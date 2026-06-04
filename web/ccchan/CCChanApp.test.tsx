@@ -11,8 +11,11 @@ import { useTerminalStatusStore } from "@/stores/useTerminalStatusStore";
 import type { TerminalOutputPayload } from "./types";
 import type { TerminalStatusInfo } from "@/types";
 
+type WindowMoveHandler = (event: { payload: { x: number; y: number } }) => void;
+
 const windowMock = {
   close: vi.fn(() => Promise.resolve()),
+  onMoved: vi.fn((_handler: WindowMoveHandler) => Promise.resolve(() => {})),
   outerPosition: vi.fn(() => Promise.resolve({ x: 0, y: 0 })),
   scaleFactor: vi.fn(() => Promise.resolve(1)),
   startDragging: vi.fn(() => Promise.resolve()),
@@ -32,6 +35,7 @@ describe("CCChanApp", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     windowMock.close.mockClear();
+    windowMock.onMoved.mockResolvedValue(() => {});
     windowMock.outerPosition.mockResolvedValue({ x: 0, y: 0 });
     windowMock.scaleFactor.mockResolvedValue(1);
     windowMock.startDragging.mockClear();
@@ -283,6 +287,71 @@ describe("CCChanApp", () => {
     expect(settings.windowX).toBe(200);
     expect(settings.windowY).toBe(120);
     nowSpy.mockRestore();
+  });
+
+  it("persists negative logical coordinates after dragging across monitors", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValueOnce(2_000).mockReturnValueOnce(2_260);
+    windowMock.outerPosition.mockResolvedValue({ x: -3840, y: -210 });
+    windowMock.scaleFactor.mockResolvedValue(1.5);
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+
+    render(<CCChanApp />);
+    fireEvent.mouseDown(screen.getByRole("button", { name: "打开 cc酱 chat" }), { button: 0 });
+    window.dispatchEvent(new MouseEvent("mouseup"));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: -2560, y: -140 });
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.windowX).toBe(-2560);
+    expect(settings.windowY).toBe(-140);
+    nowSpy.mockRestore();
+  });
+
+  it("persists drag movement from window move events when mouseup is not delivered", async () => {
+    const handlers: {
+      moved?: WindowMoveHandler;
+    } = {};
+    windowMock.scaleFactor.mockResolvedValue(2);
+    windowMock.onMoved.mockImplementation(async (handler) => {
+      handlers.moved = handler;
+      return () => {};
+    });
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+
+    render(<CCChanApp />);
+    await waitFor(() => {
+      expect(handlers.moved).toBeTruthy();
+    });
+    vi.useFakeTimers();
+    fireEvent.mouseDown(screen.getByRole("button", { name: "打开 cc酱 chat" }), { button: 0 });
+    await act(async () => {
+      handlers.moved?.({ payload: { x: 640, y: 420 } });
+      await vi.advanceTimersByTimeAsync(320);
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: 320, y: 210 });
+    await act(async () => {
+      handlers.moved?.({ payload: { x: 680, y: 460 } });
+      await vi.advanceTimersByTimeAsync(1500);
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: 340, y: 230 });
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.windowX).toBe(340);
+    expect(settings.windowY).toBe(230);
+    vi.useRealTimers();
   });
 
   it("hides and persists visibility when the context menu exit action is used", async () => {
