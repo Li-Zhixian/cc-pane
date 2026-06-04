@@ -42,6 +42,7 @@ ref/
 .ccpanes/
 .spec-workflow/
 .serena/
+_mod_memory/
 
 # 本地代理/编排状态
 .omx/
