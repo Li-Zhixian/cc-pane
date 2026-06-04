@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, ExternalLink, FolderPlus, MapPin, Music, Power, Sparkles, Trash2 } from "lucide-react";
+import { Bot, Download, FolderPlus, MapPin, Music, Power, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -12,7 +11,6 @@ import { useWorkspacesStore } from "@/stores/useWorkspacesStore";
 import { cancelCCChanPetPreview, confirmCCChanAction, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
 import { toWslPath } from "@/utils";
 import type {
-  AwesomeCodexPetEntry,
   CCChanPetInstallPreview,
   CCChanRolePreset,
   CCChanSettings as CCChanSettingsValue,
@@ -28,12 +26,6 @@ interface CCChanSettingsProps {
 const ENGINE_OPTIONS = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
-] as const;
-
-const PET_RESOURCE_LINKS = [
-  { label: "Codex Pets", url: "https://codex-pets.net/#/?sort=popular" },
-  { label: "awesome-codex-pet", url: "https://github.com/legeling/awesome-codex-pet" },
-  { label: "Codex 官方说明", url: "https://developers.openai.com/codex/app/settings#codex-pets" },
 ] as const;
 
 const ROLE_TEMPLATES: Array<{
@@ -133,11 +125,6 @@ function isReadonlyInstallablePet(pet: PetMeta): pet is ReadonlyInstallablePet {
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
-  const [awesomePets, setAwesomePets] = useState<AwesomeCodexPetEntry[]>([]);
-  const [awesomeQuery, setAwesomeQuery] = useState("");
-  const [awesomeVisibleCount, setAwesomeVisibleCount] = useState(12);
-  const [awesomeLoading, setAwesomeLoading] = useState(false);
-  const [awesomeInstallSlug, setAwesomeInstallSlug] = useState<string | null>(null);
   const [customDirStatuses, setCustomDirStatuses] = useState<CustomPetDirStatus[]>([]);
   const [customDirStatusLoading, setCustomDirStatusLoading] = useState(false);
   const selectedWorkspace = useWorkspacesStore((state) => state.selectedWorkspace());
@@ -167,21 +154,6 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     return null;
   }, [selectedProject, selectedWorkspace]);
   const userPets = petOptions.filter((pet) => pet.source === "user");
-  const filteredAwesomePets = useMemo(() => {
-    const query = awesomeQuery.trim().toLowerCase();
-    return query
-      ? awesomePets.filter((pet) => [
-          pet.name,
-          pet.slug,
-          pet.author,
-          pet.authorHandle,
-          pet.primaryCategory,
-          pet.license,
-          pet.description,
-        ].some((value) => value.toLowerCase().includes(query)))
-      : awesomePets;
-  }, [awesomePets, awesomeQuery]);
-  const visibleAwesomePets = filteredAwesomePets.slice(0, awesomeVisibleCount);
   const readonlyInstallablePets = petOptions.filter(isReadonlyInstallablePet);
   const activeRoleWslWarning = activeRole ? getActiveRoleWslWarning(activeRole, currentWslTarget) : null;
 
@@ -383,56 +355,12 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     }
   }
 
-  async function openPetResource(url: string) {
-    try {
-      await openUrl(url);
-    } catch (error) {
-      toast.error(`打开链接失败: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   async function refreshPets() {
     try {
       await load();
       toast.success("宠物列表已刷新");
     } catch (error) {
       toast.error(`刷新失败: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  async function loadAwesomePets() {
-    setAwesomeLoading(true);
-    try {
-      const entries = await invoke<AwesomeCodexPetEntry[]>("list_ccchan_awesome_codex_pets");
-      setAwesomePets(entries);
-      setAwesomeVisibleCount(12);
-      toast.success(`已载入 ${entries.length} 个 Awesome Codex Pet`);
-    } catch (error) {
-      toast.error(`载入 Awesome Codex Pet 失败: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setAwesomeLoading(false);
-    }
-  }
-
-  async function installAwesomePet(entry: AwesomeCodexPetEntry) {
-    setAwesomeInstallSlug(entry.slug);
-    try {
-      const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_awesome_codex_pet", { slug: entry.slug });
-      const confirmed = await confirmCCChanAction(
-        `安装 Awesome Codex Pet "${preview.pet.displayName}" (${preview.pet.id})？`,
-        { okLabel: "安装" },
-      );
-      if (!confirmed) {
-        await cancelCCChanPetPreview(preview.stagingId);
-        return;
-      }
-      await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
-      await load();
-      toast.success("桌宠已安装");
-    } catch (error) {
-      toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setAwesomeInstallSlug(null);
     }
   }
 
@@ -744,92 +672,6 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
                 </div>
               ))}
             </div>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {PET_RESOURCE_LINKS.map((link) => (
-            <Button key={link.url} type="button" size="sm" variant="ghost" onClick={() => void openPetResource(link.url)}>
-              <ExternalLink size={13} />
-              {link.label}
-            </Button>
-          ))}
-        </div>
-        <div className="flex flex-col gap-2 rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-[12px] font-medium" style={{ color: "var(--app-text-primary)" }}>
-                Awesome Codex Pet 目录
-              </div>
-              <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-                从 awesome-codex-pet 的公开 catalog 拉取，可搜索并一键安装。
-              </p>
-            </div>
-            <Button type="button" size="sm" variant="secondary" disabled={awesomeLoading} onClick={() => void loadAwesomePets()}>
-              {awesomeLoading ? "载入中..." : awesomePets.length > 0 ? "刷新目录" : "载入目录"}
-            </Button>
-          </div>
-          {awesomePets.length > 0 && (
-            <>
-              <input
-                value={awesomeQuery}
-                placeholder="搜索名称、作者、分类或 license"
-                className="h-8 rounded-md px-2 text-[12px] outline-none"
-                style={selectStyle}
-                onChange={(event) => {
-                  setAwesomeQuery(event.target.value);
-                  setAwesomeVisibleCount(12);
-                }}
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-                <span>
-                  显示 {Math.min(visibleAwesomePets.length, filteredAwesomePets.length)} / {filteredAwesomePets.length}
-                  {filteredAwesomePets.length !== awesomePets.length ? `，总计 ${awesomePets.length}` : ""}
-                </span>
-                {visibleAwesomePets.length < filteredAwesomePets.length && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setAwesomeVisibleCount((count) => count + 12)}
-                  >
-                    显示更多
-                  </Button>
-                )}
-              </div>
-              <div className="grid max-h-72 gap-2 overflow-y-auto md:grid-cols-2">
-                {visibleAwesomePets.map((entry) => (
-                  <div
-                    key={entry.slug}
-                    className="flex flex-col gap-2 rounded-md border p-2 text-[12px]"
-                    style={{ borderColor: "var(--app-border)", background: "var(--app-content)" }}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-medium" style={{ color: "var(--app-text-primary)" }}>{entry.name}</div>
-                      <div className="truncate" style={{ color: "var(--app-text-tertiary)" }}>
-                        {entry.author || entry.authorHandle || "unknown"} · {entry.primaryCategory || "uncategorized"}
-                      </div>
-                    </div>
-                    {entry.description && (
-                      <p className="m-0 max-h-9 overflow-hidden" style={{ color: "var(--app-text-secondary)" }}>
-                        {entry.description}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate" style={{ color: "var(--app-text-tertiary)" }}>{entry.license || "license unknown"}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={awesomeInstallSlug === entry.slug}
-                        onClick={() => void installAwesomePet(entry)}
-                      >
-                        {awesomeInstallSlug === entry.slug ? "安装中..." : "安装"}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
           )}
         </div>
         {userPets.length > 0 && (

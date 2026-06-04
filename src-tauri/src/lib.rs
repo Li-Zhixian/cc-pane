@@ -14,8 +14,7 @@ pub mod utils;
 use ccchan_commands::{
     cancel_ccchan_pet_preview, delete_ccchan_user_pet, get_ccchan_custom_pet_dir_statuses,
     get_ccchan_pets, get_ccchan_settings, hide_ccchan, install_ccchan_pet_from_path,
-    install_ccchan_pet_from_preview, install_ccchan_pet_from_source,
-    list_ccchan_awesome_codex_pets, move_ccchan_window, preview_ccchan_awesome_codex_pet,
+    install_ccchan_pet_from_preview, install_ccchan_pet_from_source, move_ccchan_window,
     preview_ccchan_pet_from_path, preview_ccchan_pet_from_url, resize_ccchan_for_chat,
     resize_ccchan_for_menu, save_ccchan_settings, send_to_ccchan, show_ccchan, start_ccchan_chat,
     stop_ccchan_chat,
@@ -1554,8 +1553,6 @@ pub fn run() {
             stop_ccchan_chat,
             get_ccchan_pets,
             preview_ccchan_pet_from_url,
-            list_ccchan_awesome_codex_pets,
-            preview_ccchan_awesome_codex_pet,
             preview_ccchan_pet_from_path,
             install_ccchan_pet_from_preview,
             cancel_ccchan_pet_preview,

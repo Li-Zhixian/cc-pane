@@ -59,17 +59,6 @@ export interface CustomPetDirStatus {
   message: string;
 }
 
-export interface AwesomeCodexPetEntry {
-  slug: string;
-  name: string;
-  author: string;
-  authorHandle: string;
-  authorUrl: string;
-  primaryCategory: string;
-  license: string;
-  description: string;
-}
-
 export interface CCChanEvent {
   kind: "task-complete" | "task-failed" | "task-waiting";
   sessionId: string;
