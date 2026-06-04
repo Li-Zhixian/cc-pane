@@ -1486,6 +1486,26 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
+                WindowEvent::Moved(position) => {
+                    if window.label() == "ccchan" {
+                        if let Some(ccchan_svc) =
+                            window.app_handle().try_state::<Arc<CCChanService>>()
+                        {
+                            let scale = window
+                                .current_monitor()
+                                .ok()
+                                .flatten()
+                                .map(|monitor| monitor.scale_factor())
+                                .or_else(|| window.scale_factor().ok())
+                                .unwrap_or(1.0);
+                            if let Err(error) = ccchan_svc
+                                .save_window_physical_position(position.x, position.y, scale)
+                            {
+                                warn!("[ccchan] failed to persist moved position: {}", error);
+                            }
+                        }
+                    }
+                }
                 WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == "main" {
                         if should_close_main_window_to_tray(window) {

@@ -211,6 +211,13 @@ impl CCChanService {
         self.save_settings(settings)
     }
 
+    pub fn save_window_physical_position(&self, x: i32, y: i32, scale: f64) -> AppResult<()> {
+        let safe_scale = if scale > 0.0 { scale } else { 1.0 };
+        let logical_x = x as f64 / safe_scale;
+        let logical_y = y as f64 / safe_scale;
+        self.save_window_position(logical_x, logical_y)
+    }
+
     pub fn get_pets(&self, app: &AppHandle) -> AppResult<Vec<PetMeta>> {
         self.discover_pets(app)
     }
