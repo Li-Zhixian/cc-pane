@@ -24,6 +24,26 @@ const doroPet: PetMeta = {
   animations: { idle: { row: 0, frames: 1, fps: 1 } },
 };
 
+const homiePet: PetMeta = {
+  id: "homie",
+  displayName: "Homie",
+  description: "Default pet",
+  spritesheetUrl: "asset://homie",
+  source: "builtin",
+  atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
+  animations: { idle: { row: 0, frames: 1, fps: 1 } },
+};
+
+const userPet: PetMeta = {
+  id: "custom-pet",
+  displayName: "Custom Pet",
+  description: "User installed pet",
+  spritesheetUrl: "asset://custom-pet",
+  source: "user",
+  atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
+  animations: { idle: { row: 0, frames: 1, fps: 1 } },
+};
+
 const awesomePet: AwesomeCodexPetEntry = {
   slug: "firefly--lingxiaotian",
   name: "Firefly",
@@ -41,6 +61,14 @@ function renderSettings(
 ) {
   render(<CCChanSettings value={value} onChange={onChange} />);
   return { onChange };
+}
+
+function installPreview(pet: PetMeta = doroPet) {
+  return {
+    stagingId: "stage-1",
+    sourcePath: "https://example.invalid/pet.zip",
+    pet: { ...pet, source: "user" as const },
+  };
 }
 
 async function waitForInitialLoad() {
@@ -64,27 +92,28 @@ describe("CCChanSettings", () => {
     vi.mocked(invoke).mockImplementation((cmd, args) => {
       if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
       if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "preview_ccchan_pet_from_url") {
+        return Promise.resolve(installPreview());
+      }
       if (cmd === "list_ccchan_awesome_codex_pets") return Promise.resolve([awesomePet]);
       if (cmd === "preview_ccchan_awesome_codex_pet") {
         expect(args).toEqual({ slug: "firefly--lingxiaotian" });
-        return Promise.resolve({
-          stagingId: "stage-1",
-          sourcePath: "https://raw.githubusercontent.com/legeling/awesome-codex-pet/main/pets/firefly--lingxiaotian/pet.json",
-          pet: {
-            ...doroPet,
-            id: "firefly--lingxiaotian",
-            displayName: "Firefly",
-            source: "user",
-          },
-        });
+        return Promise.resolve(installPreview({
+          ...doroPet,
+          id: "firefly--lingxiaotian",
+          displayName: "Firefly",
+        }));
       }
       if (cmd === "install_ccchan_pet_from_preview") {
         expect(args).toEqual({ stagingId: "stage-1" });
         return Promise.resolve(undefined);
       }
+      if (cmd === "delete_ccchan_user_pet") return Promise.resolve(undefined);
+      if (cmd === "save_ccchan_settings") return Promise.resolve(undefined);
       return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(window, "prompt").mockReturnValue(null);
   });
 
   it("adds a Codex WSL role from the quick templates and warns when remote path is missing", async () => {
@@ -103,7 +132,7 @@ describe("CCChanSettings", () => {
 
     renderSettings(next);
     await waitForInitialLoad();
-    expect(screen.getByText(/WSL 角色需要填写远端路径/)).toBeInTheDocument();
+    expect(screen.getByText(/WSL 角色需要填写.*远端路径/)).toBeInTheDocument();
   });
 
   it("updates WSL remote path for the active role", async () => {
@@ -147,5 +176,74 @@ describe("CCChanSettings", () => {
       expect(invoke).toHaveBeenCalledWith("preview_ccchan_awesome_codex_pet", { slug: "firefly--lingxiaotian" });
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
     });
+  });
+
+  it("previews and installs an HTTPS zip URL", async () => {
+    vi.mocked(window.prompt).mockReturnValue("https://example.invalid/pet.zip");
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: "https://example.invalid/pet.zip" });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+
+  it("previews and installs a codex pet deep link", async () => {
+    const deepLink = "codex://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp";
+    vi.mocked(window.prompt).mockReturnValue(deepLink);
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: deepLink });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+
+  it("deletes the active user pet and saves fallback pet references", async () => {
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      defaultPetId: userPet.id,
+      roles: [{ ...DEFAULT_CCCHAN_SETTINGS.roles[0], petId: userPet.id }],
+    };
+    useCCChanStore.setState({
+      settings,
+      pets: [userPet, homiePet],
+      loaded: true,
+    });
+    vi.mocked(invoke).mockImplementation((cmd, args) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(settings);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([userPet, homiePet]);
+      if (cmd === "delete_ccchan_user_pet") {
+        expect(args).toEqual({ petId: userPet.id });
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "save_ccchan_settings") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "删除当前用户宠物" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("delete_ccchan_user_pet", { petId: userPet.id });
+      expect(invoke).toHaveBeenCalledWith(
+        "save_ccchan_settings",
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            defaultPetId: homiePet.id,
+            roles: expect.arrayContaining([expect.objectContaining({ petId: homiePet.id })]),
+          }),
+        }),
+      );
+    });
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
+    expect(next.defaultPetId).toBe(homiePet.id);
   });
 });
