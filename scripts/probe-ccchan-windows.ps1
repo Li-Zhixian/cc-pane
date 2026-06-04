@@ -5,6 +5,7 @@ param(
   [switch]$VerifyDrag,
   [switch]$VerifyNativeMove,
   [switch]$VerifyTrayToggle,
+  [switch]$DumpTrayMenu,
   [string]$TrayTooltip = "CC-Panes [DEV]"
 )
 
@@ -21,9 +22,14 @@ public class CCChanWin32Probe {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int nMaxCount, uint uFlag);
+  [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr hMenu);
+  [DllImport("user32.dll")] public static extern bool GetMenuItemRect(IntPtr hWnd, IntPtr hMenu, uint uItem, out RECT lprcItem);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT lpPoint);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
@@ -39,6 +45,8 @@ public class CCChanWin32Probe {
   public const uint SWP_NOSIZE = 0x0001;
   public const uint SWP_NOZORDER = 0x0004;
   public const uint SWP_NOACTIVATE = 0x0010;
+  public const uint MF_BYPOSITION = 0x00000400;
+  public const uint MN_GETHMENU = 0x01E1;
   public const uint INPUT_MOUSE = 0;
   public const uint MOUSEEVENTF_MOVE = 0x0001;
   public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -51,12 +59,12 @@ public class CCChanWin32Probe {
   public static void SendMouse(uint flags, int dx, int dy) {
     INPUT[] inputs = new INPUT[1];
     inputs[0].type = INPUT_MOUSE;
-    inputs[0].mi.dx = dx;
-    inputs[0].mi.dy = dy;
-    inputs[0].mi.mouseData = 0;
-    inputs[0].mi.dwFlags = flags;
-    inputs[0].mi.time = 0;
-    inputs[0].mi.dwExtraInfo = IntPtr.Zero;
+    inputs[0].U.mi.dx = dx;
+    inputs[0].U.mi.dy = dy;
+    inputs[0].U.mi.mouseData = 0;
+    inputs[0].U.mi.dwFlags = flags;
+    inputs[0].U.mi.time = 0;
+    inputs[0].U.mi.dwExtraInfo = IntPtr.Zero;
     SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
   }
 }
@@ -64,7 +72,12 @@ public class CCChanWin32Probe {
 [StructLayout(LayoutKind.Sequential)]
 public struct INPUT {
   public uint type;
-  public MOUSEINPUT mi;
+  public INPUTUNION U;
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct INPUTUNION {
+  [FieldOffset(0)] public MOUSEINPUT mi;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -364,20 +377,44 @@ function Find-TrayOverflowButtonByLayout {
     }
 
     $trayRect = $trayNotify.Current.BoundingRectangle
+    $buttons = New-Object System.Collections.Generic.List[object]
     foreach ($element in $elements) {
       if ($element.Current.ClassName -ne "SystemTray.NormalButton" -or $element.Current.IsOffscreen) {
         continue
       }
 
       $rect = $element.Current.BoundingRectangle
-      $nearTrayStart = $rect.Left -ge ($trayRect.Left - 2) -and $rect.Left -le ($trayRect.Left + 48)
+      $nearTrayStart = $rect.Left -ge ($trayRect.Left - 4) -and $rect.Left -le ($trayRect.Left + 80)
       if ($nearTrayStart -and $rect.Width -gt 0 -and $rect.Height -gt 0) {
-        return $element
+        $buttons.Add($element) | Out-Null
       }
+    }
+
+    $button = $buttons |
+      Sort-Object { $_.Current.BoundingRectangle.Left } |
+      Select-Object -First 1
+    if ($button) {
+      return $button
     }
   }
 
   return $null
+}
+
+function Invoke-AutomationElementIfAvailable {
+  param([object]$Element)
+
+  try {
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    if ($pattern) {
+      $pattern.Invoke()
+      return $true
+    }
+  } catch {
+    return $false
+  }
+
+  return $false
 }
 
 function Click-AutomationElement {
@@ -411,7 +448,10 @@ function Click-AutomationElement {
 function Open-TrayOverflowIfAvailable {
   $layoutButton = Find-TrayOverflowButtonByLayout
   if ($layoutButton) {
-    Click-AutomationElement -Element $layoutButton -Button "Left"
+    $opened = Invoke-AutomationElementIfAvailable -Element $layoutButton
+    if (-not $opened) {
+      Click-AutomationElement -Element $layoutButton -Button "Left"
+    }
     Start-Sleep -Milliseconds 500
     return $true
   }
@@ -423,7 +463,10 @@ function Open-TrayOverflowIfAvailable {
     $button = Find-AutomationElementsByNamePart -NamePart $label -RootClassNames @("Shell_TrayWnd") |
       Select-Object -First 1
     if ($button) {
-      Click-AutomationElement -Element $button -Button "Left"
+      $opened = Invoke-AutomationElementIfAvailable -Element $button
+      if (-not $opened) {
+        Click-AutomationElement -Element $button -Button "Left"
+      }
       Start-Sleep -Milliseconds 500
       return $true
     }
@@ -431,16 +474,33 @@ function Open-TrayOverflowIfAvailable {
   return $false
 }
 
+function Test-CCPanesTrayIconCandidate {
+  param([object]$Element)
+
+  if (-not $Element) {
+    return $false
+  }
+
+  $className = $Element.Current.ClassName
+  if ($className -and $className.StartsWith("Taskbar.", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $false
+  }
+
+  $rect = $Element.Current.BoundingRectangle
+  return [bool]((-not $Element.Current.IsOffscreen) -and $rect.Width -gt 0 -and $rect.Height -gt 0)
+}
+
 function Find-CCPanesTrayIcon {
   param([string]$Tooltip)
 
-  $rootClasses = @("Shell_TrayWnd", "NotifyIconOverflowWindow")
+  $rootClasses = @("Shell_TrayWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland")
   $nameParts = @($Tooltip, "CC-Panes", "cc-panes") |
     Where-Object { $_ } |
     Select-Object -Unique
 
   foreach ($namePart in $nameParts) {
     $icon = Find-AutomationElementsByNamePart -NamePart $namePart -RootClassNames $rootClasses |
+      Where-Object { Test-CCPanesTrayIconCandidate -Element $_ } |
       Select-Object -First 1
     if ($icon) {
       return $icon
@@ -450,6 +510,7 @@ function Find-CCPanesTrayIcon {
   [void](Open-TrayOverflowIfAvailable)
   foreach ($namePart in $nameParts) {
     $icon = Find-AutomationElementsByNamePart -NamePart $namePart -RootClassNames $rootClasses |
+      Where-Object { Test-CCPanesTrayIconCandidate -Element $_ } |
       Select-Object -First 1
     if ($icon) {
       return $icon
@@ -459,26 +520,256 @@ function Find-CCPanesTrayIcon {
   return $null
 }
 
+function Get-TraySearchDiagnostics {
+  param([string]$Tooltip)
+
+  $rootClasses = @("Shell_TrayWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland")
+  $roots = New-Object System.Collections.Generic.List[object]
+  foreach ($rootElement in Get-AutomationRootElements) {
+    if ($rootClasses -notcontains $rootElement.Current.ClassName) {
+      continue
+    }
+
+    $rootRect = $rootElement.Current.BoundingRectangle
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $elements = $rootElement.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+    foreach ($element in $elements) {
+      $name = $element.Current.Name
+      $className = $element.Current.ClassName
+      if (
+        ($name -and (
+          $name.IndexOf($Tooltip, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+          $name.IndexOf("CC-Panes", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+          $name.IndexOf("cc-panes", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        )) -or
+        ($className -and (
+          $className.IndexOf("Tray", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+          $className.IndexOf("Notify", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+          $className.IndexOf("SystemTray", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        ))
+      ) {
+        $rect = $element.Current.BoundingRectangle
+        $candidates.Add([pscustomobject]@{
+          name = $name
+          className = $className
+          controlType = $element.Current.ControlType.ProgrammaticName
+          isOffscreen = $element.Current.IsOffscreen
+          left = $rect.Left
+          top = $rect.Top
+          width = $rect.Width
+          height = $rect.Height
+        }) | Out-Null
+      }
+    }
+
+    $roots.Add([pscustomobject]@{
+      className = $rootElement.Current.ClassName
+      name = $rootElement.Current.Name
+      left = $rootRect.Left
+      top = $rootRect.Top
+      width = $rootRect.Width
+      height = $rootRect.Height
+      candidates = $candidates.ToArray()
+    }) | Out-Null
+  }
+
+  return [pscustomobject]@{
+    tooltip = $Tooltip
+    roots = $roots.ToArray()
+  }
+}
+
+function Find-TrayMenuItemByNamePart {
+  param(
+    [string]$NamePart,
+    [int]$TimeoutMs = 1200
+  )
+
+  $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+  do {
+    $menuItem = Find-AutomationElementsByNamePart -NamePart $NamePart -RootClassNames @("#32768") |
+      Select-Object -First 1
+    if ($menuItem) {
+      return $menuItem
+    }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+
+  return $null
+}
+
+function Get-NativePopupMenus {
+  $menus = New-Object System.Collections.Generic.List[object]
+  $callback = [CCChanWin32Probe+EnumWindowsProc]{
+    param([IntPtr]$hwnd, [IntPtr]$lparam)
+
+    if (-not [CCChanWin32Probe]::IsWindowVisible($hwnd)) {
+      return $true
+    }
+
+    $className = New-Object System.Text.StringBuilder 256
+    [void][CCChanWin32Probe]::GetClassName($hwnd, $className, $className.Capacity)
+    if ($className.ToString() -ne "#32768") {
+      return $true
+    }
+
+    $hMenu = [CCChanWin32Probe]::SendMessage($hwnd, [CCChanWin32Probe]::MN_GETHMENU, [IntPtr]::Zero, [IntPtr]::Zero)
+    if ($hMenu -eq [IntPtr]::Zero) {
+      return $true
+    }
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $count = [CCChanWin32Probe]::GetMenuItemCount($hMenu)
+    for ($index = 0; $index -lt $count; $index++) {
+      $textBuilder = New-Object System.Text.StringBuilder 256
+      [void][CCChanWin32Probe]::GetMenuString($hMenu, [uint32]$index, $textBuilder, $textBuilder.Capacity, [CCChanWin32Probe]::MF_BYPOSITION)
+      $rect = New-Object RECT
+      [void][CCChanWin32Probe]::GetMenuItemRect($hwnd, $hMenu, [uint32]$index, [ref]$rect)
+      $items.Add([pscustomobject]@{
+        index = $index
+        text = $textBuilder.ToString()
+        left = $rect.Left
+        top = $rect.Top
+        width = $rect.Right - $rect.Left
+        height = $rect.Bottom - $rect.Top
+      }) | Out-Null
+    }
+
+    $windowRect = New-Object RECT
+    [void][CCChanWin32Probe]::GetWindowRect($hwnd, [ref]$windowRect)
+    $menus.Add([pscustomobject]@{
+      hwnd = $hwnd
+      handle = ("0x{0:X}" -f $hwnd.ToInt64())
+      left = $windowRect.Left
+      top = $windowRect.Top
+      width = $windowRect.Right - $windowRect.Left
+      height = $windowRect.Bottom - $windowRect.Top
+      items = $items.ToArray()
+    }) | Out-Null
+
+    return $true
+  }
+
+  [void][CCChanWin32Probe]::EnumWindows($callback, [IntPtr]::Zero)
+  return $menus.ToArray()
+}
+
+function Find-NativeTrayMenuItem {
+  param(
+    [string]$NamePart,
+    [int]$TimeoutMs = 1200
+  )
+
+  $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+  do {
+    foreach ($menu in Get-NativePopupMenus) {
+      foreach ($item in $menu.items) {
+        $matchesNamePart = $item.text.IndexOf($NamePart, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        $matchesAsciiPrefix = $item.text.IndexOf("Show/Hide cc", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        if (($matchesNamePart -or $matchesAsciiPrefix) -and $item.width -gt 0 -and $item.height -gt 0) {
+          return [pscustomobject]@{
+            menu = $menu
+            item = $item
+          }
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+
+  return $null
+}
+
+function Click-NativeMenuItem {
+  param([object]$MenuItem)
+
+  $item = $MenuItem.item
+  $x = [int]($item.left + [Math]::Floor($item.width / 2))
+  $y = [int]($item.top + [Math]::Floor($item.height / 2))
+  [void][CCChanWin32Probe]::SetCursorPos($x, $y)
+  Start-Sleep -Milliseconds 120
+  [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 60
+  [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+}
+
+function Get-TrayMenuDiagnostics {
+  param([string]$Tooltip)
+
+  $icon = Find-CCPanesTrayIcon -Tooltip $Tooltip
+  if (-not $icon) {
+    $diagnostics = Get-TraySearchDiagnostics -Tooltip $Tooltip | ConvertTo-Json -Depth 8
+    throw "Could not find a visible tray icon with tooltip containing '$Tooltip'. Search diagnostics: $diagnostics"
+  }
+
+  $originalCursor = New-Object POINT
+  [void][CCChanWin32Probe]::GetCursorPos([ref]$originalCursor)
+  try {
+    Click-AutomationElement -Element $icon -Button "Right"
+    Start-Sleep -Milliseconds 700
+
+    $menuItemName = "Show/Hide cc" + [char]0x9171
+    $automationCandidates = Find-AutomationElementsByNamePart -NamePart "Show" -RootClassNames @("#32768") |
+      ForEach-Object {
+        $rect = $_.Current.BoundingRectangle
+        [pscustomobject]@{
+          name = $_.Current.Name
+          className = $_.Current.ClassName
+          controlType = $_.Current.ControlType.ProgrammaticName
+          isOffscreen = $_.Current.IsOffscreen
+          left = $rect.Left
+          top = $rect.Top
+          width = $rect.Width
+          height = $rect.Height
+        }
+      }
+
+    return [pscustomobject]@{
+      iconName = $icon.Current.Name
+      iconClassName = $icon.Current.ClassName
+      expectedMenuItem = $menuItemName
+      nativePopupMenus = @(Get-NativePopupMenus)
+      automationCandidates = @($automationCandidates)
+    }
+  } finally {
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [void][CCChanWin32Probe]::SetCursorPos($originalCursor.X, $originalCursor.Y)
+  }
+}
+
 function Invoke-CCChanTrayMenuToggle {
   param([string]$Tooltip)
 
   $icon = Find-CCPanesTrayIcon -Tooltip $Tooltip
   if (-not $icon) {
-    throw "Could not find a visible tray icon with tooltip containing '$Tooltip'. Pin the icon or open the overflow menu before using -VerifyTrayToggle."
+    $diagnostics = Get-TraySearchDiagnostics -Tooltip $Tooltip | ConvertTo-Json -Depth 8
+    throw "Could not find a visible tray icon with tooltip containing '$Tooltip'. Search diagnostics: $diagnostics"
   }
 
   Click-AutomationElement -Element $icon -Button "Right"
   Start-Sleep -Milliseconds 500
 
   $menuItemName = "Show/Hide cc" + [char]0x9171
-  $menuItem = Find-AutomationElementsByNamePart -NamePart $menuItemName |
-    Select-Object -First 1
-  if (-not $menuItem) {
-    throw "Could not find tray menu item '$menuItemName' after opening the tray menu."
+  $nativeMenuItem = Find-NativeTrayMenuItem -NamePart $menuItemName
+  if ($nativeMenuItem) {
+    Click-NativeMenuItem -MenuItem $nativeMenuItem
+    Start-Sleep -Milliseconds 500
+    return "win32-native-menu-item"
   }
 
-  Click-AutomationElement -Element $menuItem -Button "Left"
-  Start-Sleep -Milliseconds 500
+  $menuItem = Find-TrayMenuItemByNamePart -NamePart $menuItemName
+  if ($menuItem) {
+    Click-AutomationElement -Element $menuItem -Button "Left"
+    Start-Sleep -Milliseconds 500
+    return "uia-menu-item"
+  }
+
+  $nativeDiagnostics = Get-NativePopupMenus | ConvertTo-Json -Depth 8
+  throw "Could not locate tray menu item '$menuItemName' through Win32 menu APIs or UI Automation. Native popup diagnostics: $nativeDiagnostics"
 }
 
 function Test-CCChanTrayToggle {
@@ -497,12 +788,12 @@ function Test-CCChanTrayToggle {
   [void][CCChanWin32Probe]::GetCursorPos([ref]$originalCursor)
 
   try {
-    Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
+    $hideMethod = Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
     $afterHideProbe = Wait-CCChanMascotState -ProcessId $ProcessId -Visible $false
     $configAfterHide = Read-CCChanConfigVisible -Path $ConfigPath
     $hideOk = [bool]((-not $afterHideProbe.mascot) -and $configAfterHide -eq $false)
 
-    Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
+    $showMethod = Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
     $afterShowProbe = Wait-CCChanMascotState -ProcessId $ProcessId -Visible $true
     $configAfterShow = Read-CCChanConfigVisible -Path $ConfigPath
     $showOk = [bool]($afterShowProbe.mascot -and $configAfterShow -eq $true)
@@ -512,6 +803,8 @@ function Test-CCChanTrayToggle {
       tooltip = $Tooltip
       hideOk = $hideOk
       showOk = $showOk
+      hideMethod = $hideMethod
+      showMethod = $showMethod
       before = $InitialMascot
       afterHide = $afterHideProbe.mascot
       afterShow = $afterShowProbe.mascot
@@ -653,6 +946,11 @@ $devProcess = Get-Process cc-panes -ErrorAction SilentlyContinue |
 
 if (-not $devProcess) {
   throw "Dev cc-panes process not found at '$DevExePath'. Start 'npm run tauri:dev' first."
+}
+
+if ($DumpTrayMenu) {
+  Get-TrayMenuDiagnostics -Tooltip $TrayTooltip | ConvertTo-Json -Depth 8
+  exit 0
 }
 
 $windowProbe = Get-MascotWindow -ProcessId $devProcess.Id
