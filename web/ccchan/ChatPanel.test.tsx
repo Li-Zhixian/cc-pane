@@ -51,6 +51,7 @@ describe("ChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listen).mockResolvedValue(() => {});
+    vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
   });
 
   it("starts a local chat session with the active role settings", async () => {
@@ -188,6 +189,123 @@ describe("ChatPanel", () => {
     expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "start_ccchan_chat")).toHaveLength(2);
   });
 
+  it("keeps the active session when the role changes while hidden", () => {
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        visible={false}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings(wslRole.id)}
+        sessionId="active-session"
+        visible={false}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(invoke).not.toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
+    expect(onSessionIdChange).not.toHaveBeenCalledWith(null);
+  });
+
+  it("keeps a startup session when the panel is hidden before startup completes", async () => {
+    const start = deferred<string>();
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "start_ccchan_chat") return start.promise;
+      if (cmd === "stop_ccchan_chat") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId={null}
+        visible
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", expect.objectContaining({ aiEngine: "claude" }));
+    });
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings(wslRole.id)}
+        sessionId={null}
+        visible={false}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    start.resolve("late-session");
+
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith("late-session");
+    });
+    expect(invoke).not.toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "late-session" });
+  });
+
+  it("applies a hidden role change after a late startup session is shown again", async () => {
+    const start = deferred<string>();
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "start_ccchan_chat") return start.promise;
+      if (cmd === "stop_ccchan_chat") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId={null}
+        visible
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", expect.objectContaining({ aiEngine: "claude" }));
+    });
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings(wslRole.id)}
+        sessionId={null}
+        visible={false}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    start.resolve("late-session");
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith("late-session");
+    });
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings(wslRole.id)}
+        sessionId="late-session"
+        visible
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(invoke).toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "late-session" });
+    expect(onSessionIdChange).toHaveBeenCalledWith(null);
+  });
+
   it("stops the active session when the user clicks stop", async () => {
     const onSessionIdChange = vi.fn();
     vi.mocked(invoke).mockResolvedValue(undefined);
@@ -205,6 +323,33 @@ describe("ChatPanel", () => {
 
     expect(invoke).toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
     expect(onSessionIdChange).toHaveBeenCalledWith(null);
+  });
+
+  it("does not auto-restart after the user stops the current session", async () => {
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "停止当前 chat" }));
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId={null}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(invoke).not.toHaveBeenCalledWith("start_ccchan_chat", expect.anything());
   });
 
   it("keeps listening and replays output while hidden", async () => {
@@ -249,6 +394,30 @@ describe("ChatPanel", () => {
     );
 
     expect(await screen.findByText(/hidden output/)).toBeInTheDocument();
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalled();
+  });
+
+  it("cleans up an output listener that resolves after unmount", async () => {
+    const unlisten = vi.fn();
+    const listenerReady = deferred<() => void>();
+    vi.mocked(listen).mockReturnValue(listenerReady.promise);
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    const { unmount } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        onSessionIdChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    unmount();
+    listenerReady.resolve(unlisten);
+
+    await waitFor(() => {
+      expect(unlisten).toHaveBeenCalled();
+    });
   });
 
   it("closes the panel without stopping the active session", async () => {

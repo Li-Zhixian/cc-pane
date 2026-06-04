@@ -28,7 +28,7 @@ Role chat runtime supports `local` and explicit `wsl`. WSL chat requires a role-
 
 The chat panel blocks obviously invalid WSL role paths before starting a PTY and formats startup failures into actionable CLI, WSL, MCP, or provider/auth hints. The backend serializes ccchan chat start/stop lifecycle operations so rapid role switches or a stop request during startup cannot interleave session id mutation with PTY kill/create.
 
-Closing the chat panel only collapses the ccchan window back to the pet size. The active chat PTY stays mounted in the hidden panel, terminal output continues to be buffered, and reopening the panel replays output captured while hidden. The explicit stop button still terminates the active chat session and clears the visible transcript.
+Closing the chat panel only collapses the ccchan window back to the pet size. The active chat PTY stays mounted in the hidden panel, terminal output continues to be buffered, and reopening the panel replays output captured while hidden. Closing during startup also keeps the pending startup mounted so a late session id is retained instead of being killed as stale. Role changes made while the panel is hidden do not immediately stop the hidden session; reopening the panel applies the normal visible role-switch behavior. The explicit stop button still terminates the active chat session, clears the visible transcript, and suppresses automatic restart until the panel is reopened.
 
 The ccchan window uses consistent sizes across frontend and backend resize commands: collapsed pet `120x120`, chat `460x640`, and context menu `460x260`.
 
@@ -119,7 +119,7 @@ Windows-host-required validation still applies for desktop behavior: transparent
 Current-environment-verifiable:
 
 - TypeScript: `npx tsc --noEmit --pretty false`.
-- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts`.
+- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts web/ccchan/ChatPanel.test.tsx web/ccchan/CCChanApp.test.tsx`.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
 

@@ -8,6 +8,7 @@ interface ChatPanelProps {
   settings: CCChanSettings;
   sessionId: string | null;
   visible?: boolean;
+  autoStart?: boolean;
   onSessionIdChange: (sessionId: string | null) => void;
   onClose: () => void;
 }
@@ -42,7 +43,14 @@ export function formatChatStartupError(error: unknown, aiEngine: string, runtime
   return `${runtimeLabel} ${engineLabel} 启动失败：${text}`;
 }
 
-export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChange, onClose }: ChatPanelProps) {
+export function ChatPanel({
+  settings,
+  sessionId,
+  visible = true,
+  autoStart = true,
+  onSessionIdChange,
+  onClose,
+}: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
@@ -58,6 +66,8 @@ export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChan
   const mountedRef = useRef(true);
   const [startupRetryToken, setStartupRetryToken] = useState(0);
   const previousRoleSessionKeyRef = useRef(roleSessionKey);
+  const previousVisibleRef = useRef(visible);
+  const stoppedByUserRef = useRef(false);
   const aiEngine = activeRole?.aiEngine ?? settings.aiEngine;
   const roleName = activeRole?.name ?? "默认助手";
   const systemPrompt = activeRole?.systemPrompt;
@@ -73,21 +83,36 @@ export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChan
   }, []);
 
   useEffect(() => {
-    latestRoleSessionKeyRef.current = roleSessionKey;
-  }, [roleSessionKey]);
+    if (visible || (!sessionId && !startingRef.current)) {
+      latestRoleSessionKeyRef.current = roleSessionKey;
+    }
+  }, [roleSessionKey, sessionId, visible]);
+
+  useEffect(() => {
+    if (visible && !previousVisibleRef.current) {
+      stoppedByUserRef.current = false;
+    }
+    previousVisibleRef.current = visible;
+  }, [visible]);
 
   useEffect(() => {
     if (previousRoleSessionKeyRef.current === roleSessionKey) return;
+    if (!sessionId) {
+      if (visible || !startingRef.current) {
+        previousRoleSessionKeyRef.current = roleSessionKey;
+      }
+      return;
+    }
+    if (!visible) return;
     previousRoleSessionKeyRef.current = roleSessionKey;
-    if (!sessionId) return;
     invoke("stop_ccchan_chat", { sessionId }).catch(() => {});
     onSessionIdChange(null);
     setLines([]);
-  }, [onSessionIdChange, roleSessionKey, sessionId]);
+  }, [onSessionIdChange, roleSessionKey, sessionId, visible]);
 
   useEffect(() => {
     async function ensureSession() {
-      if (sessionId || startingRef.current) return;
+      if (sessionId || startingRef.current || !visible || !autoStart || stoppedByUserRef.current) return;
       const validationError = validateChatStartup(runtimeKind, wslRemotePath);
       if (validationError) {
         setError(validationError);
@@ -125,17 +150,34 @@ export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChan
     }
 
     void ensureSession();
-  }, [aiEngine, onSessionIdChange, roleSessionKey, runtimeKind, sessionId, startupRetryToken, systemPrompt, wslDistro, wslRemotePath]);
+  }, [
+    aiEngine,
+    autoStart,
+    onSessionIdChange,
+    roleSessionKey,
+    runtimeKind,
+    sessionId,
+    startupRetryToken,
+    systemPrompt,
+    visible,
+    wslDistro,
+    wslRemotePath,
+  ]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
 
     async function attachOutput() {
-      unlisten = await listen<TerminalOutputPayload>("terminal-output", (event) => {
+      const nextUnlisten = await listen<TerminalOutputPayload>("terminal-output", (event) => {
         if (event.payload.sessionId !== sessionId) return;
         setLines((current) => [...current, event.payload.data].slice(-400));
       });
+      if (cancelled) {
+        nextUnlisten();
+        return;
+      }
+      unlisten = nextUnlisten;
     }
 
     if (sessionId) {
@@ -152,7 +194,7 @@ export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChan
 
   useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight });
-  }, [lines]);
+  }, [lines, visible]);
 
   async function handleSubmit() {
     const text = input.trimEnd();
@@ -172,6 +214,7 @@ export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChan
 
   async function handleStop() {
     if (!sessionId) return;
+    stoppedByUserRef.current = true;
     try {
       await invoke("stop_ccchan_chat", { sessionId });
     } finally {

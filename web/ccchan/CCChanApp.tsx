@@ -60,6 +60,7 @@ export function CCChanApp() {
   const [activeMainSessionId, setActiveMainSessionId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<CCChanContextMenuPosition | null>(null);
   const [menuOwnsResize, setMenuOwnsResize] = useState(false);
+  const [chatMounted, setChatMounted] = useState(() => expanded || Boolean(chatSessionId));
   const dragStartedAtRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
 
@@ -289,6 +290,7 @@ export function CCChanApp() {
   }, [setPosition]);
 
   async function openChat() {
+    setChatMounted(true);
     if (expanded) return;
     await invoke("resize_ccchan_for_chat", { expanded: true });
     setExpanded(true);
@@ -398,11 +400,12 @@ export function CCChanApp() {
           pointerEvents: expanded ? "auto" : "none",
         }}
       >
-        {(expanded || chatSessionId) && (
+        {chatMounted && (
           <ChatPanel
             settings={settings}
             sessionId={chatSessionId}
             visible={expanded}
+            autoStart={chatMounted}
             onSessionIdChange={setChatSessionId}
             onClose={() => void closeChat().catch(() => {})}
           />
