@@ -41,6 +41,8 @@ pub struct WslLaunchInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_remote_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_sync_project_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distro: Option<String>,
 }
 

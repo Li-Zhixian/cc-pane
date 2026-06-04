@@ -462,7 +462,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
               </div>
               {!activeRole.wslRemotePath?.trim() && (
                 <p className="m-0 rounded-md border px-2 py-1 text-[11px]" style={{ borderColor: "var(--app-warning-border, #b7791f)", color: "var(--app-warning-text, #f6ad55)" }}>
-                  WSL 角色需要填写远端路径，否则 cc酱 chat 启动时会被后端拒绝。
+                  WSL 角色需要填写以 / 开头的绝对远端路径，否则 cc酱 chat 启动时会被后端拒绝。
                 </p>
               )}
             </div>

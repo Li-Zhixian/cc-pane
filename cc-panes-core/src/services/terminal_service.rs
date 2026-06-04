@@ -1026,6 +1026,83 @@ fn should_apply_pty_status_fallback(hook_active: bool, current: SessionStatus) -
     !hook_active && !matches!(current, SessionStatus::Exited | SessionStatus::Error)
 }
 
+fn wsl_hook_sync_project_path<'a>(
+    wsl: Option<&'a WslLaunchInfo>,
+    workspace_path: Option<&'a str>,
+    project_path: &'a str,
+) -> &'a str {
+    wsl.and_then(|info| info.hook_sync_project_path.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| workspace_path.unwrap_or(project_path))
+}
+
+fn wsl_remote_project_path_to_host_path(remote_path: &str, distro: &str) -> Option<String> {
+    let remote_path = remote_path.trim();
+    if remote_path.is_empty() || remote_path.starts_with('~') {
+        return None;
+    }
+
+    let mut segments = remote_path.trim_start_matches('/').splitn(3, '/');
+    if remote_path.starts_with("/mnt/") && segments.next() == Some("mnt") {
+        if let Some(drive) = segments.next() {
+            if drive.len() == 1 && drive.as_bytes()[0].is_ascii_alphabetic() {
+                let drive = drive.to_ascii_uppercase();
+                let rest = segments.next().unwrap_or_default().replace('/', "\\");
+                return if rest.is_empty() {
+                    Some(format!("{drive}:\\"))
+                } else {
+                    Some(format!("{drive}:\\{rest}"))
+                };
+            }
+        }
+    }
+
+    if remote_path.starts_with('/') {
+        let distro = distro.trim();
+        if distro.is_empty() {
+            return None;
+        }
+        let rest = remote_path.trim_start_matches('/').replace('/', "\\");
+        return if rest.is_empty() {
+            Some(format!("\\\\wsl.localhost\\{distro}"))
+        } else {
+            Some(format!("\\\\wsl.localhost\\{distro}\\{rest}"))
+        };
+    }
+
+    None
+}
+
+fn wsl_hook_sync_host_project_path(
+    wsl: &WslLaunchInfo,
+    distro: &str,
+    workspace_path: Option<&str>,
+    project_path: &str,
+) -> String {
+    if let Some(remote_path) = wsl
+        .hook_sync_project_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(host_path) = wsl_remote_project_path_to_host_path(remote_path, distro) {
+            return host_path;
+        }
+    }
+
+    workspace_path.unwrap_or(project_path).to_string()
+}
+
+fn explicit_wsl_hook_sync_host_project_path(wsl: &WslLaunchInfo, distro: &str) -> Option<String> {
+    let remote_path = wsl
+        .hook_sync_project_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    wsl_remote_project_path_to_host_path(remote_path, distro)
+}
+
 fn append_ssh_session_options(args: &mut Vec<String>) {
     for option in [
         "ConnectTimeout=10",
@@ -1302,9 +1379,11 @@ impl TerminalService {
         // 解析 Shell 配置
         let shell_id = self.settings_service.get_settings().terminal.shell.clone();
 
+        let effective_project_path_for_env =
+            wsl_hook_sync_project_path(wsl, workspace_path, project_path);
         env_vars.insert(
             "CC_PANES_PROJECT_PATH".to_string(),
-            project_path.to_string(),
+            effective_project_path_for_env.to_string(),
         );
         let canonical_workspace_name = resolved_workspace
             .as_ref()
@@ -1402,7 +1481,18 @@ impl TerminalService {
             let mut resolved_wsl = self.resolve_wsl_launch(wsl_info, &session_id)?;
 
             if cli_tool_id != "none" {
-                let hooks_project_path = workspace_path.unwrap_or(project_path);
+                let explicit_hook_host_path =
+                    explicit_wsl_hook_sync_host_project_path(wsl_info, &resolved_wsl.distro);
+                let hooks_project_path = wsl_hook_sync_host_project_path(
+                    wsl_info,
+                    &resolved_wsl.distro,
+                    workspace_path,
+                    project_path,
+                );
+                let codex_target_project_path = explicit_hook_host_path
+                    .as_deref()
+                    .unwrap_or(project_path)
+                    .to_string();
                 if sync_project_hooks {
                     let hook_sync_result = if cli_tool == CliTool::Codex {
                         let hook_binary =
@@ -1419,8 +1509,8 @@ impl TerminalService {
                         match hook_binary {
                             Ok(wsl_hook_binary) => {
                                 self.project_cli_hooks_service.sync_wsl_codex_project_hooks(
-                                    hooks_project_path,
-                                    project_path,
+                                    &hooks_project_path,
+                                    &codex_target_project_path,
                                     &wsl_hook_binary,
                                 )
                             }
@@ -1442,7 +1532,7 @@ impl TerminalService {
                             Ok(wsl_hook_binary) => self
                                 .project_cli_hooks_service
                                 .sync_project_cli_hooks_with_binary(
-                                    hooks_project_path,
+                                    &hooks_project_path,
                                     cli_tool_id,
                                     &wsl_hook_binary,
                                 ),
@@ -1454,7 +1544,7 @@ impl TerminalService {
                         warn!(
                             session_id = %session_id,
                             cli_tool = cli_tool_id,
-                            project_path = hooks_project_path,
+                            project_path = %hooks_project_path,
                             error = %error,
                             "create_session: failed to sync project hooks before WSL launch; continuing"
                         );
@@ -1463,7 +1553,7 @@ impl TerminalService {
                     info!(
                         session_id = %session_id,
                         cli_tool = cli_tool_id,
-                        project_path = hooks_project_path,
+                        project_path = %hooks_project_path,
                         "create_session: launch profile disabled WSL project skill hook sync"
                     );
                 }
@@ -2894,6 +2984,65 @@ mod tests {
                     replay_buffer: Arc::new(Mutex::new(ReplayBuffer::new(1024))),
                 },
             );
+    }
+
+    #[test]
+    fn wsl_hook_sync_project_path_prefers_explicit_remote_path() {
+        let wsl = WslLaunchInfo {
+            remote_path: "/home/dev/cc-pane".to_string(),
+            workspace_remote_path: None,
+            hook_sync_project_path: Some(" /home/dev/cc-pane ".to_string()),
+            distro: Some("Ubuntu".to_string()),
+        };
+
+        assert_eq!(
+            wsl_hook_sync_project_path(Some(&wsl), Some("D:\\workspace"), "D:\\data\\ccchan"),
+            "/home/dev/cc-pane"
+        );
+        assert_eq!(
+            wsl_hook_sync_project_path(None, Some("D:\\workspace"), "D:\\project"),
+            "D:\\workspace"
+        );
+        assert_eq!(
+            wsl_hook_sync_project_path(None, None, "D:\\project"),
+            "D:\\project"
+        );
+    }
+
+    #[test]
+    fn wsl_remote_project_path_to_host_path_maps_mounts_and_unc() {
+        assert_eq!(
+            wsl_remote_project_path_to_host_path("/mnt/d/my-project/cc-pane", "Ubuntu").as_deref(),
+            Some("D:\\my-project\\cc-pane")
+        );
+        assert_eq!(
+            wsl_remote_project_path_to_host_path("/home/dev/cc-pane", "Ubuntu-24.04").as_deref(),
+            Some("\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\cc-pane")
+        );
+        assert_eq!(
+            wsl_remote_project_path_to_host_path("~/cc-pane", "Ubuntu"),
+            None
+        );
+    }
+
+    #[test]
+    fn wsl_hook_sync_host_project_path_prefers_explicit_remote_mapping() {
+        let wsl = WslLaunchInfo {
+            remote_path: "/mnt/d/my-project/cc-pane".to_string(),
+            workspace_remote_path: None,
+            hook_sync_project_path: Some("/mnt/d/my-project/cc-pane".to_string()),
+            distro: Some("Ubuntu".to_string()),
+        };
+
+        assert_eq!(
+            wsl_hook_sync_host_project_path(
+                &wsl,
+                "Ubuntu",
+                Some("D:\\workspace"),
+                "D:\\data\\ccchan"
+            ),
+            "D:\\my-project\\cc-pane"
+        );
     }
 
     #[test]

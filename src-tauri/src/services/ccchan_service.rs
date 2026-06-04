@@ -397,36 +397,50 @@ impl CCChanService {
 
     pub fn install_pet_from_path(&self, path: String) -> AppResult<PetMeta> {
         let source = PathBuf::from(path.trim());
-        let pet_root = if source.is_file()
-            && source
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
-        {
-            let bytes = std::fs::read(&source).map_err(|error| {
-                AppError::from(format!(
-                    "Failed to read pet zip {}: {}",
-                    source.display(),
-                    error
-                ))
-            })?;
-            if bytes.len() > MAX_PET_PACKAGE_BYTES {
-                return Err(AppError::from(format!(
-                    "Pet package is too large: {} bytes",
-                    bytes.len()
-                )));
+        let mut staging_dir_to_cleanup = None;
+        let result = (|| {
+            let pet_root = if source.is_file()
+                && source
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+            {
+                let bytes = std::fs::read(&source).map_err(|error| {
+                    AppError::from(format!(
+                        "Failed to read pet zip {}: {}",
+                        source.display(),
+                        error
+                    ))
+                })?;
+                if bytes.len() > MAX_PET_PACKAGE_BYTES {
+                    return Err(AppError::from(format!(
+                        "Pet package is too large: {} bytes",
+                        bytes.len()
+                    )));
+                }
+                let staging_id = uuid::Uuid::new_v4().to_string();
+                let staging_dir = self.pet_staging_dir().join(&staging_id);
+                std::fs::create_dir_all(&staging_dir)?;
+                staging_dir_to_cleanup = Some(staging_dir.clone());
+                extract_pet_zip(&bytes, &staging_dir)?;
+                find_pet_root(&staging_dir)?
+            } else {
+                find_pet_root(&source)?
+            };
+            let pet = self.install_pet_dir(&pet_root)?;
+            self.emit_settings_updated();
+            Ok(pet)
+        })();
+        if let Some(staging_dir) = staging_dir_to_cleanup {
+            if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
+                warn!(
+                    path = %staging_dir.display(),
+                    error = %error,
+                    "failed to remove ccchan pet staging directory after direct install"
+                );
             }
-            let staging_id = uuid::Uuid::new_v4().to_string();
-            let staging_dir = self.pet_staging_dir().join(&staging_id);
-            std::fs::create_dir_all(&staging_dir)?;
-            extract_pet_zip(&bytes, &staging_dir)?;
-            find_pet_root(&staging_dir)?
-        } else {
-            find_pet_root(&source)?
-        };
-        let pet = self.install_pet_dir(&pet_root)?;
-        self.emit_settings_updated();
-        Ok(pet)
+        }
+        result
     }
 
     pub fn delete_user_pet(&self, pet_id: String) -> AppResult<()> {
@@ -925,14 +939,15 @@ fn build_ccchan_wsl_launch(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| AppError::from("ccchan WSL chat requires a WSL remote path"))?;
-            if !remote_path.starts_with('/') && !remote_path.starts_with('~') {
+            if !remote_path.starts_with('/') {
                 return Err(AppError::from(format!(
-                    "ccchan WSL chat remote path must start with / or ~: {remote_path}"
+                    "ccchan WSL chat remote path must start with /: {remote_path}"
                 )));
             }
             Ok(Some(WslLaunchInfo {
                 remote_path: remote_path.to_string(),
                 workspace_remote_path: None,
+                hook_sync_project_path: Some(remote_path.to_string()),
                 distro: wsl_distro
                     .as_deref()
                     .map(str::trim)
@@ -1862,6 +1877,38 @@ mod tests {
     }
 
     #[test]
+    fn install_pet_from_path_cleans_direct_zip_staging_dir() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let package_path = temp.path().join("sample.zip");
+        let bytes = zip_bytes(&[
+            (
+                "sample/pet.json",
+                br#"{"id":"sample","spritesheetPath":"spritesheet.webp"}"#,
+            ),
+            ("sample/spritesheet.webp", &[1_u8, 2, 3]),
+        ]);
+        std::fs::write(&package_path, bytes).expect("write package");
+
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let pet = service
+            .install_pet_from_path(package_path.to_string_lossy().to_string())
+            .expect("install pet from zip");
+
+        assert_eq!(pet.id, "sample");
+        assert!(data_dir.join("ccchan").join("pets").join("sample").exists());
+        let staging_dir = data_dir.join("ccchan").join("pet-staging");
+        let staging_entries = std::fs::read_dir(&staging_dir)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(staging_entries, 0);
+    }
+
+    #[test]
     fn write_single_frame_pet_json_creates_loadable_pet() {
         let temp = tempdir().expect("tempdir");
         let pet_dir = temp.path().join("pet");
@@ -1940,7 +1987,7 @@ mod tests {
         let windows_path =
             build_ccchan_wsl_launch("wsl", Some("D:\\my-project\\cc-pane".to_string()), None)
                 .expect_err("Windows path rejected");
-        assert!(windows_path.to_string().contains("must start with / or ~"));
+        assert!(windows_path.to_string().contains("must start with /"));
 
         let unc_path = build_ccchan_wsl_launch(
             "wsl",
@@ -1948,12 +1995,12 @@ mod tests {
             None,
         )
         .expect_err("UNC path rejected");
-        assert!(unc_path.to_string().contains("must start with / or ~"));
+        assert!(unc_path.to_string().contains("must start with /"));
 
         let relative_path =
             build_ccchan_wsl_launch("wsl", Some("workspace/repo".to_string()), None)
                 .expect_err("relative path rejected");
-        assert!(relative_path.to_string().contains("must start with / or ~"));
+        assert!(relative_path.to_string().contains("must start with /"));
     }
 
     #[test]
@@ -1969,9 +2016,8 @@ mod tests {
         assert_eq!(launch.remote_path, "/home/dev/repo");
         assert_eq!(launch.distro.as_deref(), Some("Ubuntu"));
 
-        let home = build_ccchan_wsl_launch("wsl", Some("~/repo".to_string()), None)
-            .expect("build wsl")
-            .expect("wsl launch");
-        assert_eq!(home.remote_path, "~/repo");
+        let home =
+            build_ccchan_wsl_launch("wsl", Some("~/repo".to_string()), None).expect_err("reject ~");
+        assert!(home.to_string().contains("must start with /"));
     }
 }

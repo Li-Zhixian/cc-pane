@@ -1236,6 +1236,7 @@ pub fn run() {
                 let external_skill_registry = app.state::<Arc<ExternalSkillRegistry>>();
                 let lh_svc = app.state::<Arc<LaunchHistoryService>>();
                 let notif_svc = app.state::<Arc<NotificationService>>();
+                let ccchan_svc = app.state::<Arc<CCChanService>>();
                 let settings_svc = app.state::<Arc<SettingsService>>();
                 let plan_archive_svc = app.state::<Arc<PlanArchiveService>>();
                 let runner_svc = app.state::<Arc<cc_panes_core::services::RunnerService>>();
@@ -1258,6 +1259,7 @@ pub fn run() {
                     external_skill_registry.inner().clone(),
                     lh_svc.inner().clone(),
                     notif_svc.inner().clone(),
+                    ccchan_svc.inner().clone(),
                     settings_svc.inner().clone(),
                     plan_archive_svc.inner().clone(),
                     runner_svc.inner().clone(),

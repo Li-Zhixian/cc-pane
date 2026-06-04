@@ -129,7 +129,7 @@ describe("useCCChanStore", () => {
         role.id === wslRole.id ? { ...role, wslRemotePath: "D:\\my-project\\cc-pane" } : role,
       ),
     });
-    expect(getCCChanRuntimeValidationError(windowsPath)).toContain("必须以 / 或 ~ 开头");
+    expect(getCCChanRuntimeValidationError(windowsPath)).toContain("必须以 / 开头");
 
     const uncPath = normalizeCCChanSettings({
       ...settings,
@@ -139,7 +139,7 @@ describe("useCCChanStore", () => {
           : role,
       ),
     });
-    expect(getCCChanRuntimeValidationError(uncPath)).toContain("必须以 / 或 ~ 开头");
+    expect(getCCChanRuntimeValidationError(uncPath)).toContain("必须以 / 开头");
 
     const relativePath = normalizeCCChanSettings({
       ...settings,
@@ -147,7 +147,15 @@ describe("useCCChanStore", () => {
         role.id === wslRole.id ? { ...role, wslRemotePath: "workspace/repo" } : role,
       ),
     });
-    expect(getCCChanRuntimeValidationError(relativePath)).toContain("必须以 / 或 ~ 开头");
+    expect(getCCChanRuntimeValidationError(relativePath)).toContain("必须以 / 开头");
+
+    const homePath = normalizeCCChanSettings({
+      ...settings,
+      roles: settings.roles.map((role) =>
+        role.id === wslRole.id ? { ...role, wslRemotePath: "~/repo" } : role,
+      ),
+    });
+    expect(getCCChanRuntimeValidationError(homePath)).toContain("必须以 / 开头");
 
     const linuxPath = normalizeCCChanSettings({
       ...settings,
@@ -181,6 +189,45 @@ describe("useCCChanStore", () => {
 
     expect(useCCChanStore.getState().pets).toEqual([doroPet]);
     expect(useCCChanStore.getState().settings.activeRoleId).toBe("default");
+  });
+
+  it("falls back to the first available pet when the saved pet is missing", async () => {
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") {
+        return Promise.resolve({
+          ...DEFAULT_CCCHAN_SETTINGS,
+          defaultPetId: "missing-pet",
+          roles: [{ ...DEFAULT_CCCHAN_SETTINGS.roles[0], petId: "missing-pet" }],
+        });
+      }
+      if (cmd === "get_ccchan_pets") {
+        return Promise.resolve([homiePet, doroPet]);
+      }
+      return Promise.reject(new Error(`Unhandled command: ${cmd}`));
+    });
+
+    await useCCChanStore.getState().load();
+
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.defaultPetId).toBe("homie");
+    expect(settings.roles[0].petId).toBe("homie");
+  });
+
+  it("switches from the visible first pet when the saved pet is missing", () => {
+    useCCChanStore.setState({
+      settings: normalizeCCChanSettings({
+        ...DEFAULT_CCCHAN_SETTINGS,
+        defaultPetId: "missing-pet",
+        roles: [{ ...DEFAULT_CCCHAN_SETTINGS.roles[0], petId: "missing-pet" }],
+      }),
+      pets: [homiePet, doroPet],
+    });
+
+    useCCChanStore.getState().switchPet();
+
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.defaultPetId).toBe("homie");
+    expect(settings.roles[0].petId).toBe("homie");
   });
 
   it("runs a follow-up load when an update arrives during loading", async () => {

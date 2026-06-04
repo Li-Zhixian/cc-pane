@@ -81,8 +81,8 @@ export function getCCChanRuntimeValidationError(settings: CCChanSettings): strin
     if (!remotePath) {
       return `cc酱 WSL 角色“${label}”需要填写 WSL 远端路径。`;
     }
-    if (!remotePath.startsWith("/") && !remotePath.startsWith("~")) {
-      return `cc酱 WSL 角色“${label}”的远端路径必须以 / 或 ~ 开头。`;
+    if (!remotePath.startsWith("/")) {
+      return `cc酱 WSL 角色“${label}”的远端路径必须以 / 开头。`;
     }
   }
   return null;
@@ -203,6 +203,19 @@ function normalizePets(pets: PetMeta[] | null | undefined): PetMeta[] {
   return pets && pets.length > 0 ? pets : [FALLBACK_PET];
 }
 
+function normalizeSettingsForPets(settings: CCChanSettings, pets: PetMeta[]): CCChanSettings {
+  const fallbackPetId = pets[0]?.id ?? FALLBACK_PET.id;
+  const availablePetIds = new Set(pets.map((pet) => pet.id));
+  const roles = settings.roles.map((role) =>
+    availablePetIds.has(role.petId) ? role : { ...role, petId: fallbackPetId },
+  );
+  return normalizeCCChanSettings({
+    ...settings,
+    defaultPetId: availablePetIds.has(settings.defaultPetId) ? settings.defaultPetId : fallbackPetId,
+    roles,
+  });
+}
+
 let loadPromise: Promise<void> | null = null;
 let reloadRequested = false;
 
@@ -229,9 +242,10 @@ export const useCCChanStore = create<CCChanStoreState>((set, get) => ({
             invoke<CCChanSettings>("get_ccchan_settings").catch(() => DEFAULT_CCCHAN_SETTINGS),
             invoke<PetMeta[]>("get_ccchan_pets").catch(() => [FALLBACK_PET]),
           ]);
+          const normalizedPets = normalizePets(pets);
           set({
-            settings: normalizeCCChanSettings(settings),
-            pets: normalizePets(pets),
+            settings: normalizeSettingsForPets(normalizeCCChanSettings(settings), normalizedPets),
+            pets: normalizedPets,
             loaded: true,
           });
         } while (reloadRequested);
@@ -289,8 +303,9 @@ export const useCCChanStore = create<CCChanStoreState>((set, get) => ({
   switchPet: () => {
     const { pets, settings } = get();
     if (pets.length === 0) return;
-    const currentIndex = Math.max(0, pets.findIndex((pet) => pet.id === settings.defaultPetId));
-    const nextPet = pets[(currentIndex + 1) % pets.length];
+    const currentIndex = pets.findIndex((pet) => pet.id === settings.defaultPetId);
+    const safeCurrentIndex = currentIndex >= 0 ? currentIndex : pets.length - 1;
+    const nextPet = pets[(safeCurrentIndex + 1) % pets.length];
     set((state) => ({
       settings: normalizeCCChanSettings({
         ...state.settings,

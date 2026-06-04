@@ -9,6 +9,7 @@
 //! - 项目路径白名单校验
 //! - 请求频率限制
 
+use crate::ccchan_service::CCChanService;
 use crate::models::task_binding::{TaskBinding, TaskBindingStatus};
 use crate::models::todo::{
     CreateTodoRequest, TodoPriority, TodoQuery, TodoScope, TodoStatus, UpdateTodoRequest,
@@ -348,6 +349,7 @@ pub struct AppState {
     pub external_skill_registry: Arc<ExternalSkillRegistry>,
     pub launch_history_service: Arc<LaunchHistoryService>,
     pub notification_service: Arc<NotificationService>,
+    pub ccchan_service: Arc<CCChanService>,
     pub settings_service: Arc<SettingsService>,
     pub plan_archive_service: Arc<crate::services::PlanArchiveService>,
     /// Runner Registry：项目运行实例 + 端口/PID 跟踪
@@ -428,6 +430,7 @@ impl OrchestratorService {
         external_skill_registry: Arc<ExternalSkillRegistry>,
         launch_history_service: Arc<LaunchHistoryService>,
         notification_service: Arc<NotificationService>,
+        ccchan_service: Arc<CCChanService>,
         settings_service: Arc<SettingsService>,
         plan_archive_service: Arc<crate::services::PlanArchiveService>,
         runner_service: Arc<cc_panes_core::services::RunnerService>,
@@ -454,6 +457,7 @@ impl OrchestratorService {
             external_skill_registry,
             launch_history_service,
             notification_service,
+            ccchan_service,
             settings_service,
             plan_archive_service,
             runner_service,
@@ -477,6 +481,7 @@ impl OrchestratorService {
         {
             let app_handle_for_listener = state.app_handle.clone();
             let notif_svc = state.notification_service.clone();
+            let ccchan_svc = state.ccchan_service.clone();
             let settings_svc = state.settings_service.clone();
             let term_svc = state.terminal_service.clone();
             let runner_svc_listener = state.runner_service.clone();
@@ -509,6 +514,7 @@ impl OrchestratorService {
                                 &transition.pty_session_id,
                                 None,
                             );
+                            ccchan_svc.notify_task_waiting(&transition.pty_session_id);
                         }
                         SessionStatus::Error => {
                             notif_svc.notify_error(
@@ -518,6 +524,7 @@ impl OrchestratorService {
                                 transition.error_type.as_deref(),
                                 None,
                             );
+                            ccchan_svc.notify_task_done(&transition.pty_session_id, false);
                         }
                         SessionStatus::Exited => {
                             if transition.trigger_event == "pty-exit" {
@@ -4952,6 +4959,7 @@ fn resolve_wsl_launch_info(
                 .and_then(|ws| ws.wsl.as_ref())
                 .and_then(|cfg| cfg.remote_path.clone())
                 .filter(|path| !path.trim().is_empty()),
+            hook_sync_project_path: None,
             distro: Some(distro),
         });
     }
@@ -4980,6 +4988,7 @@ fn resolve_wsl_launch_info(
     Some(WslLaunchInfo {
         remote_path,
         workspace_remote_path,
+        hook_sync_project_path: None,
         distro: workspace
             .and_then(|ws| ws.wsl.as_ref())
             .and_then(|cfg| cfg.distro.clone())

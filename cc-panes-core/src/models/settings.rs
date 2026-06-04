@@ -368,9 +368,9 @@ impl CCChanSettings {
                 .map(str::trim)
                 .filter(|path| !path.is_empty())
                 .ok_or_else(|| format!("ccchan WSL role '{label}' requires a WSL remote path"))?;
-            if !remote_path.starts_with('/') && !remote_path.starts_with('~') {
+            if !remote_path.starts_with('/') {
                 return Err(format!(
-                    "ccchan WSL role '{label}' remote path must start with / or ~: {remote_path}"
+                    "ccchan WSL role '{label}' remote path must start with /: {remote_path}"
                 ));
             }
         }
@@ -979,10 +979,19 @@ mod tests {
             .validate_chat_runtimes()
             .expect_err("Windows path should be rejected for WSL role");
 
-        assert!(error.contains("must start with / or ~"));
+        assert!(error.contains("must start with /"));
+
+        let mut home_path = settings.clone();
+        home_path.roles[1].wsl_remote_path = Some("~/cc-pane".to_string());
+        let error = home_path
+            .validate_chat_runtimes()
+            .expect_err("home-relative WSL path should be rejected for ccchan hooks");
+        assert!(error.contains("must start with /"));
 
         let mut valid = settings.clone();
-        valid.roles[1].wsl_remote_path = Some("~/cc-pane".to_string());
-        valid.validate_chat_runtimes().expect("home path allowed");
+        valid.roles[1].wsl_remote_path = Some("/home/dev/cc-pane".to_string());
+        valid
+            .validate_chat_runtimes()
+            .expect("absolute path allowed");
     }
 }
