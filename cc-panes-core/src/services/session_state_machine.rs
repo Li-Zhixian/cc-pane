@@ -132,9 +132,17 @@ impl SessionStateMachine {
         // 状态转移表（§4.2）
         let (next, tool_use_id_change, tool_name_change) = match event {
             CcPaneEvent::SessionInit | CcPaneEvent::SessionResume => {
+                entry.current_tool_name = None;
+                entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::Initializing, None, None)
             }
-            CcPaneEvent::PromptBefore => (SessionStatus::Thinking, None, None),
+            CcPaneEvent::PromptBefore => {
+                entry.current_tool_name = None;
+                entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
+                (SessionStatus::Thinking, None, None)
+            }
             CcPaneEvent::ToolBefore(_) => {
                 let tool_name = extract_tool_name(payload).unwrap_or_else(|| "tool".into());
                 let tool_use_id = extract_tool_use_id(payload);
@@ -159,27 +167,32 @@ impl SessionStateMachine {
                 entry.turn_seq += 1;
                 entry.current_tool_name = None;
                 entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::Idle, None, None)
             }
             CcPaneEvent::BeforeCompact => {
                 entry.current_tool_name = None;
                 entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::Compacting, None, None)
             }
             CcPaneEvent::WaitingInput => {
                 let tool_use_id = extract_tool_use_id(payload);
                 entry.current_tool_name = None;
                 entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::WaitingInput, tool_use_id, None)
             }
             CcPaneEvent::Error => {
                 entry.current_tool_name = None;
                 entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::Error, None, None)
             }
             CcPaneEvent::SessionEnd => {
                 entry.current_tool_name = None;
                 entry.current_tool_summary = None;
+                entry.current_tool_use_id = None;
                 (SessionStatus::Exited, None, None)
             }
         };
@@ -465,21 +478,98 @@ mod tests {
         sm.on_event(sid, &CcPaneEvent::PromptBefore, None, &empty_payload());
         sm.on_event(
             sid,
+            &CcPaneEvent::ToolBefore(ToolMatcher::any()),
+            None,
+            &json!({
+                "tool_name": "Bash",
+                "tool_use_id": "tu-old",
+                "tool_summary": "npm test"
+            }),
+        );
+        let tool_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(tool_snap.current_tool_name.as_deref(), Some("Bash"));
+        assert_eq!(tool_snap.current_tool_use_id.as_deref(), Some("tu-old"));
+        assert_eq!(tool_snap.current_tool_summary.as_deref(), Some("npm test"));
+
+        sm.on_event(
+            sid,
             &CcPaneEvent::WaitingInput,
             None,
-            &json!({"tool_name": "Bash"}),
+            &json!({"tool_name": "Bash", "tool_use_id": "tu-waiting"}),
         );
-        assert_eq!(
-            sm.snapshot(sid).unwrap().status,
-            SessionStatus::WaitingInput
-        );
+        let waiting_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(waiting_snap.status, SessionStatus::WaitingInput);
+        assert!(waiting_snap.current_tool_name.is_none());
+        assert!(waiting_snap.current_tool_use_id.is_none());
+        assert!(waiting_snap.current_tool_summary.is_none());
+
         sm.on_event(
             sid,
             &CcPaneEvent::Error,
             None,
             &json!({"error_type": "rate_limit"}),
         );
-        assert_eq!(sm.snapshot(sid).unwrap().status, SessionStatus::Error);
+        let error_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(error_snap.status, SessionStatus::Error);
+        assert!(error_snap.current_tool_name.is_none());
+        assert!(error_snap.current_tool_use_id.is_none());
+        assert!(error_snap.current_tool_summary.is_none());
+    }
+
+    #[test]
+    fn prompt_turn_end_and_session_end_clear_tool_metadata() {
+        let sm = SessionStateMachine::new();
+        let sid = "pty-clear";
+        sm.on_event(
+            sid,
+            &CcPaneEvent::ToolBefore(ToolMatcher::any()),
+            None,
+            &json!({
+                "tool_name": "Edit",
+                "tool_use_id": "tu-1",
+                "tool_summary": "web/App.tsx"
+            }),
+        );
+        sm.on_event(sid, &CcPaneEvent::PromptBefore, None, &empty_payload());
+        let thinking_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(thinking_snap.status, SessionStatus::Thinking);
+        assert!(thinking_snap.current_tool_name.is_none());
+        assert!(thinking_snap.current_tool_use_id.is_none());
+        assert!(thinking_snap.current_tool_summary.is_none());
+
+        sm.on_event(
+            sid,
+            &CcPaneEvent::ToolBefore(ToolMatcher::any()),
+            None,
+            &json!({
+                "tool_name": "Read",
+                "tool_use_id": "tu-2",
+                "tool_summary": "docs/17-ccchan-pet-platform.md"
+            }),
+        );
+        sm.on_event(sid, &CcPaneEvent::TurnEnd, None, &empty_payload());
+        let idle_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(idle_snap.status, SessionStatus::Idle);
+        assert!(idle_snap.current_tool_name.is_none());
+        assert!(idle_snap.current_tool_use_id.is_none());
+        assert!(idle_snap.current_tool_summary.is_none());
+
+        sm.on_event(
+            sid,
+            &CcPaneEvent::ToolBefore(ToolMatcher::any()),
+            None,
+            &json!({
+                "tool_name": "Bash",
+                "tool_use_id": "tu-3",
+                "tool_summary": "cargo test"
+            }),
+        );
+        sm.on_event(sid, &CcPaneEvent::SessionEnd, None, &empty_payload());
+        let exited_snap = sm.snapshot(sid).unwrap();
+        assert_eq!(exited_snap.status, SessionStatus::Exited);
+        assert!(exited_snap.current_tool_name.is_none());
+        assert!(exited_snap.current_tool_use_id.is_none());
+        assert!(exited_snap.current_tool_summary.is_none());
     }
 
     #[test]

@@ -3075,6 +3075,38 @@ mod tests {
     }
 
     #[test]
+    fn status_info_merges_state_machine_tool_snapshot() {
+        let sm = Arc::new(crate::services::SessionStateMachine::new());
+        sm.on_event(
+            "session-tool",
+            &cc_cli_adapters::CcPaneEvent::ToolBefore(cc_cli_adapters::ToolMatcher::any()),
+            None,
+            &serde_json::json!({
+                "tool_name": "Edit",
+                "tool_use_id": "tu-status",
+                "tool_summary": "web/components/settings/CCChanSettings.tsx"
+            }),
+        );
+
+        let info = build_session_status_info(
+            "session-tool".to_string(),
+            SessionStatus::ToolRunning,
+            123,
+            Some(456),
+            Some(&sm),
+        );
+
+        assert_eq!(info.status, SessionStatus::ToolRunning);
+        assert_eq!(info.pid, Some(456));
+        assert_eq!(info.current_tool_name.as_deref(), Some("Edit"));
+        assert_eq!(info.current_tool_use_id.as_deref(), Some("tu-status"));
+        let summary = info.current_tool_summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), 40);
+        assert!(summary.starts_with("web/components/settings/CCChanSettings"));
+        assert!(info.updated_at >= 123);
+    }
+
+    #[test]
     fn submit_to_session_serializes_text_and_enter_per_session() {
         let (service, _temp_dir) = terminal_service_for_test();
         let writes = Arc::new(Mutex::new(Vec::new()));

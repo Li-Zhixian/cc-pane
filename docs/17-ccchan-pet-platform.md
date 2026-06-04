@@ -104,6 +104,7 @@ ccchan combines two status paths:
 - Event bubbles use a short session label such as `Session 12345678` when no richer title is available, avoiding full UUIDs in the desktop pet UI.
 - The ccchan window also subscribes to terminal status snapshots and live updates, giving a PTY fallback for Claude Code and Codex sessions.
 - Hook-driven `waitingInput` and `error` transitions are bridged into ccchan bubbles and sound cues. `turn-end` remains a status/notification event instead of a mascot "task complete" bubble because it means one assistant turn finished, not necessarily that the user's task is complete.
+- Session status snapshots only expose tool metadata while the session is actually `toolRunning`; prompt, waiting-input, turn-end, compacting, error, and session-end transitions clear stale tool name, tool id, and summary fields before the main window or ccchan WebView receives the next status payload.
 - `focusedWindow` mode uses a main-window bridge: ccchan emits `ccchan:ready`, the main window replies with `ccchan:active-session`, and subsequent pane/tab changes republish the active terminal session id.
 - `focusedWindow` mode also filters the visible session dots, so the desktop pet's status badge and aggregate animation follow the same focused-session scope.
 - `soundEnabled` controls the ccchan window's Web Audio cue for these lifecycle events; toast bubbles still appear when sound is disabled.
@@ -119,6 +120,7 @@ Current-environment-verifiable:
 - TypeScript: `npx tsc --noEmit --pretty false`.
 - Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts web/ccchan/deepLink.test.ts web/ccchan/ChatPanel.test.tsx web/ccchan/CCChanApp.test.tsx`.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
+- Runtime status regression checks: `cargo test -p cc-panes-core session_state_machine -- --nocapture` verifies hook transitions, stale tool metadata cleanup, and listener behavior; `cargo test -p cc-panes-core status_info_merges_state_machine_tool_snapshot -- --nocapture` verifies terminal status payloads merge current state-machine tool metadata for ccchan/frontend consumption.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
 
 Windows-host compile/build checks run from WSL through PowerShell:
@@ -135,6 +137,7 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - The ccchan window has topmost extended style bits (`WS_EX_TOPMOST`) and persisted `windowVisible`, `windowX`, and `windowY` updates in `C:\Users\ROG\.cc-panes-dev\config.toml`.
 - A later scripted Win32 window probe on the same branch found `CC-Panes [DEV]` and `cc酱` under the dev process `77300`; the mascot window was `120x120` and `TopMost=true`.
 - After the hidden-chat lifecycle fixes, a fresh scripted Win32 probe still found the dev process `77300` with `CC-Panes [DEV]` visible and a separate `cc酱` window visible at `120x120`, positioned at `(765, 489)`, with `TopMost=true`.
+- A later ASCII-only Win32 probe on 2026-06-04 avoided Unicode title matching and enumerated windows by `cc-panes.exe` PID. It found the dev process at `D:\my-project\cc-pane\target\debug\cc-panes.exe`, a visible `120x120` topmost mascot window at `(563, 485)`, and a visible full-size main window under the same PID. A separate release process was also running, but the protocol registration still pointed to the dev executable.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - Triggering a redacted pet install link and an additional supported install link with a reachable HTTPS image asset did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
 - With the dev app stopped and Vite still serving `localhost:14200`, triggering a redacted pet install link cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
