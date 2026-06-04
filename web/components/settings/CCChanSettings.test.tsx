@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import CCChanSettings from "./CCChanSettings";
 import { DEFAULT_CCCHAN_SETTINGS, useCCChanStore } from "@/stores/useCCChanStore";
 import type { AwesomeCodexPetEntry, CCChanSettings as CCChanSettingsValue, PetMeta } from "@/ccchan/types";
@@ -95,6 +96,9 @@ describe("CCChanSettings", () => {
       if (cmd === "preview_ccchan_pet_from_url") {
         return Promise.resolve(installPreview());
       }
+      if (cmd === "preview_ccchan_pet_from_path") {
+        return Promise.resolve(installPreview());
+      }
       if (cmd === "list_ccchan_awesome_codex_pets") return Promise.resolve([awesomePet]);
       if (cmd === "preview_ccchan_awesome_codex_pet") {
         expect(args).toEqual({ slug: "firefly--lingxiaotian" });
@@ -108,10 +112,12 @@ describe("CCChanSettings", () => {
         expect(args).toEqual({ stagingId: "stage-1" });
         return Promise.resolve(undefined);
       }
+      if (cmd === "install_ccchan_pet_from_path") return Promise.resolve(undefined);
       if (cmd === "delete_ccchan_user_pet") return Promise.resolve(undefined);
       if (cmd === "save_ccchan_settings") return Promise.resolve(undefined);
       return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
     });
+    vi.mocked(open).mockResolvedValue(null);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.spyOn(window, "prompt").mockReturnValue(null);
   });
@@ -174,6 +180,43 @@ describe("CCChanSettings", () => {
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("preview_ccchan_awesome_codex_pet", { slug: "firefly--lingxiaotian" });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
+    });
+  });
+
+  it("previews and installs a pet folder directly from the selected path", async () => {
+    vi.mocked(open).mockResolvedValue("/home/dev/pets/doro");
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "文件夹安装" }));
+
+    await waitFor(() => {
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({
+        directory: true,
+        multiple: false,
+        title: "选择 cc酱宠物文件夹",
+      }));
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_path", { path: "/home/dev/pets/doro" });
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_path", { path: "/home/dev/pets/doro" });
+    });
+  });
+
+  it("previews a selected pet zip and installs it from staging", async () => {
+    vi.mocked(open).mockResolvedValue("/home/dev/pets/doro.zip");
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "zip 安装" }));
+
+    await waitFor(() => {
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({
+        directory: false,
+        multiple: false,
+        title: "选择 cc酱宠物 zip",
+        filters: [{ name: "Pet package", extensions: ["zip"] }],
+      }));
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_path", { path: "/home/dev/pets/doro.zip" });
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
     });
   });
