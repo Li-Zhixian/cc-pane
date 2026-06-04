@@ -18,6 +18,8 @@ When ccchan chat is already open, changing the active role, AI engine, or role s
 
 The mascot context menu lists role presets when more than one role exists, so users can switch ccchan role, pet, and engine directly from the desktop pet without opening settings.
 
+Opening ccchan settings from the mascot menu restores, unminimizes, and focuses the main window before selecting the ccchan settings section, matching deep-link install behavior.
+
 Saving ccchan settings emits `ccchan:settings-updated`, so both the main window status bar and the separate ccchan WebView reload the latest role and pet list after settings changes, pet installs, and user pet deletion. Global settings saves use the same ccchan synchronization path, and the status bar mirrors fresh ccchan settings back into the global settings store so later saves do not overwrite mascot-only updates. Changing `windowVisible` through settings also calls the native show/hide command before persisting the new visible state. The settings save path rejects WSL roles without an absolute Linux remote path, so invalid WSL roles fail before the chat launcher is reached.
 
 Settings include quick role templates for Claude local, Codex local, Claude WSL, Codex WSL, reviewer, and executor roles. WSL role templates preserve the current role's WSL path/distro when available, and the settings UI warns when a WSL role is missing the required remote path.

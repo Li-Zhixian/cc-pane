@@ -60,6 +60,7 @@ import { playNotificationSound } from "@/utils/notificationSound";
 import { findPaneFocusTarget, readPaneFocusRects, type PaneFocusDirection } from "@/utils/paneFocus";
 import { registerGlobalApi } from "@/utils/globalApi";
 import { handleCCPanesDeepLinks } from "@/ccchan/deepLink";
+import { openCCChanSettingsInMainWindow } from "@/ccchan/openSettings";
 import i18n from "@/i18n";
 import type { PaneNode, Panel as PanelType, OpenTerminalOptions, SavedSession, TerminalPaneLeaf, TerminalPaneNode } from "@/types";
 
@@ -258,7 +259,7 @@ function MainApp() {
     });
 
     listen("ccchan:open-settings", () => {
-      if (!cancelled) useDialogStore.getState().openSettings("ccchan");
+      if (!cancelled) void openCCChanSettingsInMainWindow();
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenSettings = fn;

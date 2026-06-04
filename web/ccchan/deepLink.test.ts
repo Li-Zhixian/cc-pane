@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { handleCCPanesDeepLinks } from "./deepLink";
 import { previewAndInstallCCChanPetUrl } from "./installPet";
+import { openCCChanSettingsInMainWindow } from "./openSettings";
 import { useCCChanStore } from "@/stores/useCCChanStore";
 import { useDialogStore } from "@/stores/useDialogStore";
-
-const windowMock = {
-  setFocus: vi.fn(() => Promise.resolve()),
-  show: vi.fn(() => Promise.resolve()),
-};
 
 vi.mock("./installPet", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./installPet")>();
@@ -18,8 +13,8 @@ vi.mock("./installPet", async (importOriginal) => {
   };
 });
 
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: vi.fn(() => windowMock),
+vi.mock("./openSettings", () => ({
+  openCCChanSettingsInMainWindow: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("sonner", () => ({
@@ -46,8 +41,6 @@ function installLink(protocol: "ccpanes" | "codex") {
 describe("handleCCPanesDeepLinks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    windowMock.setFocus.mockClear();
-    windowMock.show.mockClear();
     useDialogStore.setState({
       settingsOpen: false,
       settingsSection: null,
@@ -57,14 +50,10 @@ describe("handleCCPanesDeepLinks", () => {
   it("opens ccchan settings and installs a CC-Panes pet deep link", async () => {
     const load = vi.spyOn(useCCChanStore.getState(), "load").mockResolvedValue(undefined);
     const link = installLink("ccpanes");
-    const window = getCurrentWindow();
 
     await handleCCPanesDeepLinks([TEST_ZIP_URL, link]);
 
-    expect(window.show).toHaveBeenCalled();
-    expect(window.setFocus).toHaveBeenCalled();
-    expect(useDialogStore.getState().settingsOpen).toBe(true);
-    expect(useDialogStore.getState().settingsSection).toBe("ccchan");
+    expect(openCCChanSettingsInMainWindow).toHaveBeenCalled();
     expect(previewAndInstallCCChanPetUrl).toHaveBeenCalledWith(link, load);
   });
 
@@ -74,7 +63,7 @@ describe("handleCCPanesDeepLinks", () => {
       TEST_ZIP_URL,
     ]);
 
-    expect(getCurrentWindow).not.toHaveBeenCalled();
+    expect(openCCChanSettingsInMainWindow).not.toHaveBeenCalled();
     expect(useDialogStore.getState().settingsOpen).toBe(false);
     expect(previewAndInstallCCChanPetUrl).not.toHaveBeenCalled();
   });
