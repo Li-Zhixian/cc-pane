@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Bot, Download, FolderPlus, MapPin, Music, Power, Sparkles, Trash2 } from "lucide-react";
+import { Bot, FolderPlus, MapPin, Music, Power, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CCCHAN_ROLE_PROMPT, FALLBACK_PET, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
 import { useWorkspacesStore } from "@/stores/useWorkspacesStore";
-import { cancelCCChanPetPreview, confirmCCChanAction, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
+import { cancelCCChanPetPreview, confirmCCChanAction } from "@/ccchan/installPet";
 import { toWslPath } from "@/utils";
 import type {
   CCChanPetInstallPreview,
@@ -307,16 +307,6 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       toast.error(`检查本地来源失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setCustomDirStatusLoading(false);
-    }
-  }
-
-  async function installFromUrl() {
-    const url = window.prompt("粘贴 HTTPS 桌宠 zip URL 或桌宠安装链接");
-    if (!url) return;
-    try {
-      await previewAndInstallCCChanPetUrl(url, load);
-    } catch (error) {
-      toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -636,10 +626,6 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
             <FolderPlus size={14} />
             zip 安装
           </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={() => void installFromUrl()}>
-            <Download size={14} />
-            链接安装
-          </Button>
           <Button type="button" size="sm" variant="ghost" onClick={() => void refreshPets()}>
             刷新列表
           </Button>
@@ -723,7 +709,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </div>
         )}
         <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-          支持 pet.json + spritesheet.webp/png/gif 结构；链接安装支持 HTTPS zip 和桌宠安装链接，安装前会先预览并确认。
+          支持 pet.json + spritesheet.webp/png/gif 结构；文件夹和 zip 安装前会先预览并确认。
         </p>
       </div>
 

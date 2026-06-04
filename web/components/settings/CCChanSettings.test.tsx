@@ -57,22 +57,6 @@ const customSourcePet: PetMeta = {
   animations: { idle: { row: 0, frames: 1, fps: 1 } },
 };
 
-const TEST_HTTPS_PET_URL = ["https:", "//", "pet.test.invalid", "/pet.zip"].join("");
-const TEST_BROKEN_HTTPS_PET_URL = ["https:", "//", "pet.test.invalid", "/broken.zip"].join("");
-const TEST_IMAGE_URL_ENCODED = "https%3A%2F%2Fpet.test.invalid%2Fdoro.webp";
-
-function petInstallLink(protocol: "codex" | "ccpanes") {
-  return [
-    protocol,
-    ":",
-    "//",
-    "pets",
-    "/install",
-    "?name=Doro&imageUrl=",
-    TEST_IMAGE_URL_ENCODED,
-  ].join("");
-}
-
 function renderSettings(
   value: CCChanSettingsValue = DEFAULT_CCCHAN_SETTINGS,
   onChange = vi.fn(),
@@ -84,7 +68,7 @@ function renderSettings(
 function installPreview(pet: PetMeta = doroPet) {
   return {
     stagingId: "stage-1",
-    sourcePath: TEST_HTTPS_PET_URL,
+    sourcePath: "/home/dev/pets/doro.zip",
     pet: { ...pet, source: "user" as const },
   };
 }
@@ -168,10 +152,11 @@ describe("CCChanSettings", () => {
 
     expect(screen.getByText("宠物来源")).toBeInTheDocument();
     expect(screen.getByText("默认本地目录")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "链接安装" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "链接安装" })).not.toBeInTheDocument();
     expect(screen.getByText("额外本地来源")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加来源" })).toBeInTheDocument();
-    expect(screen.getByText(/支持 pet\.json/)).toBeInTheDocument();
+    expect(screen.getByText(/文件夹和 zip 安装前会先预览并确认/)).toBeInTheDocument();
+    expect(screen.queryByText(/HTTPS|桌宠安装链接/)).not.toBeInTheDocument();
   });
 
   it("updates WSL remote path for the active role", async () => {
@@ -431,70 +416,6 @@ describe("CCChanSettings", () => {
         filters: [{ name: "Pet package", extensions: ["zip"] }],
       }));
       expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_path", { path: "/home/dev/pets/doro.zip" });
-      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
-    });
-  });
-
-  it("previews and installs an HTTPS zip URL", async () => {
-    vi.mocked(window.prompt).mockReturnValue(TEST_HTTPS_PET_URL);
-    renderSettings();
-    await waitForInitialLoad();
-
-    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: TEST_HTTPS_PET_URL });
-      expect(confirm).toHaveBeenCalledWith(
-        "安装桌宠 \"Doro\" (doro.codex-pet)？",
-        expect.objectContaining({ okLabel: "安装" }),
-      );
-      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
-    });
-  });
-
-  it("reports URL install preview failures", async () => {
-    vi.mocked(window.prompt).mockReturnValue(TEST_BROKEN_HTTPS_PET_URL);
-    vi.mocked(invoke).mockImplementation((cmd) => {
-      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
-      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
-      if (cmd === "preview_ccchan_pet_from_url") return Promise.reject(new Error("network offline"));
-      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
-    });
-    renderSettings();
-    await waitForInitialLoad();
-
-    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("安装失败: network offline");
-    });
-  });
-
-  it("previews and installs a codex pet deep link", async () => {
-    const deepLink = petInstallLink("codex");
-    vi.mocked(window.prompt).mockReturnValue(deepLink);
-    renderSettings();
-    await waitForInitialLoad();
-
-    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: deepLink });
-      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
-    });
-    expect(window.prompt).toHaveBeenCalledWith("粘贴 HTTPS 桌宠 zip URL 或桌宠安装链接");
-  });
-
-  it("previews and installs a CC-Panes pet install link", async () => {
-    const installLink = petInstallLink("ccpanes");
-    vi.mocked(window.prompt).mockReturnValue(installLink);
-    renderSettings();
-    await waitForInitialLoad();
-
-    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: installLink });
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
     });
   });

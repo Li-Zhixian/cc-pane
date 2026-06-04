@@ -1,23 +1,26 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CCChanApp } from "./CCChanApp";
 import { DEFAULT_CCCHAN_SETTINGS, FALLBACK_PET, useCCChanStore } from "@/stores/useCCChanStore";
 import { useTerminalStatusStore } from "@/stores/useTerminalStatusStore";
 import type { TerminalOutputPayload } from "./types";
 import type { TerminalStatusInfo } from "@/types";
 
+const windowMock = {
+  close: vi.fn(() => Promise.resolve()),
+  outerPosition: vi.fn(() => Promise.resolve({ x: 0, y: 0 })),
+  scaleFactor: vi.fn(() => Promise.resolve(1)),
+  startDragging: vi.fn(() => Promise.resolve()),
+};
+
 vi.mock("@tauri-apps/api/window", () => ({
   currentMonitor: vi.fn(() => Promise.resolve(null)),
-  getCurrentWindow: vi.fn(() => ({
-    close: vi.fn(() => Promise.resolve()),
-    outerPosition: vi.fn(() => Promise.resolve({ x: 0, y: 0 })),
-    scaleFactor: vi.fn(() => Promise.resolve(1)),
-    startDragging: vi.fn(() => Promise.resolve()),
-  })),
+  getCurrentWindow: vi.fn(() => windowMock),
 }));
 
 vi.mock("@/utils/notificationSound", () => ({
@@ -27,6 +30,11 @@ vi.mock("@/utils/notificationSound", () => ({
 describe("CCChanApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+    windowMock.close.mockClear();
+    windowMock.outerPosition.mockResolvedValue({ x: 0, y: 0 });
+    windowMock.scaleFactor.mockResolvedValue(1);
+    windowMock.startDragging.mockClear();
     vi.mocked(listen).mockResolvedValue(() => {});
     vi.mocked(getCurrentWebview().listen).mockResolvedValue(() => {});
     useCCChanStore.setState({
@@ -195,5 +203,32 @@ describe("CCChanApp", () => {
 
     expect(await screen.findByText(/hidden parent output/)).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
+  });
+
+  it("persists the logical window position after a drag release", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(1_250);
+    windowMock.outerPosition.mockResolvedValue({ x: 300, y: 180 });
+    windowMock.scaleFactor.mockResolvedValue(1.5);
+    useCCChanStore.setState({
+      expanded: false,
+      chatSessionId: null,
+    });
+
+    render(<CCChanApp />);
+    fireEvent.mouseDown(screen.getByRole("button", { name: "打开 cc酱 chat" }), { button: 0 });
+    window.dispatchEvent(new MouseEvent("mouseup"));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(getCurrentWindow).toHaveBeenCalled();
+    expect(windowMock.startDragging).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("move_ccchan_window", { x: 200, y: 120 });
+    const settings = useCCChanStore.getState().settings;
+    expect(settings.windowX).toBe(200);
+    expect(settings.windowY).toBe(120);
+    nowSpy.mockRestore();
   });
 });
