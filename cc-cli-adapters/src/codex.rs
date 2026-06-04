@@ -478,7 +478,7 @@ impl CodexAdapter {
             .as_table_mut()
             .ok_or_else(|| anyhow!("Codex config [features] must be a TOML table"))?;
         features_table.insert("hooks".to_string(), toml::Value::Boolean(true));
-        features_table.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
+        features_table.remove("codex_hooks");
         Self::write_config_toml(project_path, &config)
     }
 
@@ -746,7 +746,7 @@ mod tests {
         let hooks = fs::read_to_string(project_path.join(".codex").join("hooks.json")).unwrap();
 
         assert!(config.contains("hooks = true"));
-        assert!(config.contains("codex_hooks = true"));
+        assert!(!config.contains("codex_hooks"));
         assert!(hooks.contains("SessionStart"));
         assert!(hooks.contains("session-init"));
 
@@ -784,9 +784,36 @@ mod tests {
         let hooks = fs::read_to_string(project_path.join(".codex").join("hooks.json")).unwrap();
 
         assert!(config.contains("hooks = true"));
-        assert!(config.contains("codex_hooks = true"));
+        assert!(!config.contains("codex_hooks"));
         assert!(hooks.contains("/mnt/c/Users/wuxiran"));
         assert!(hooks.contains("session-init"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn sync_project_hooks_removes_deprecated_codex_hooks_feature() {
+        let dir = tempdir().unwrap();
+        let project_path = dir.path();
+        let codex_dir = project_path.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::write(
+            codex_dir.join("config.toml"),
+            "[features]\nhooks = false\ncodex_hooks = true\n",
+        )
+        .unwrap();
+        let hook_binary = project_path.join("cc-panes-cli-hook");
+        fs::write(&hook_binary, b"hook").unwrap();
+
+        let adapter = CodexAdapter::new();
+        let desired = HashMap::from([("session-inject".to_string(), true)]);
+
+        adapter
+            .sync_project_hooks(project_path, Some(&hook_binary), &desired)
+            .unwrap();
+
+        let config = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(config.contains("hooks = true"));
+        assert!(!config.contains("codex_hooks"));
     }
 
     #[cfg(windows)]

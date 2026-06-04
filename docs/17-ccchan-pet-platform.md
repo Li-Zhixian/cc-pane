@@ -115,7 +115,7 @@ ccchan combines two status paths:
 - `focusedWindow` mode also filters the visible session dots, so the desktop pet's status badge and aggregate animation follow the same focused-session scope.
 - `soundEnabled` controls the ccchan window's Web Audio cue for these lifecycle events; toast bubbles still appear when sound is disabled.
 
-Codex hooks are an enhancement path, not the only state source. The CC-Panes Codex adapter enables the canonical `[features].hooks = true` flag while retaining the deprecated `codex_hooks` alias for compatibility, then writes the currently supported `SessionStart` and `PostToolUse` command hook entries. Project-local hook behavior still depends on Codex trust/config and host/runtime details, so CC-Panes treats terminal status snapshots and backend session notifications as the cross-platform baseline for Claude Code, Codex, Windows host launches, and WSL launches.
+Codex hooks are an enhancement path, not the only state source. The CC-Panes Codex adapter enables the canonical `[features].hooks = true` flag, removes the deprecated `codex_hooks` alias when syncing project config, and writes the currently supported `SessionStart` and `PostToolUse` command hook entries. Project-local hook behavior still depends on Codex trust/config and host/runtime details, so CC-Panes treats terminal status snapshots and backend session notifications as the cross-platform baseline for Claude Code, Codex, Windows host launches, and WSL launches.
 
 Windows-host-required validation still applies for desktop behavior: transparent WebView window, always-on-top behavior, tray interaction, WebView2, and Win32/WSL PTY details cannot be fully verified from WSL alone.
 
