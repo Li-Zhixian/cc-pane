@@ -1,5 +1,6 @@
 use crate::ccchan_service::{
-    clamp_position_to_visible, AwesomeCodexPetEntry, CCChanService, PetInstallPreview, PetMeta,
+    clamp_position_to_visible, AwesomeCodexPetEntry, CCChanService, CustomPetDirStatus,
+    PetInstallPreview, PetMeta,
 };
 use crate::models::settings::CCChanSettings;
 use crate::services::TerminalService;
@@ -236,6 +237,14 @@ pub fn install_ccchan_pet_from_source(
 ) -> AppResult<PetMeta> {
     debug!(pet_id = %pet_id, source = %source, "cmd::install_ccchan_pet_from_source");
     service.install_pet_from_source(pet_id, source)
+}
+
+#[tauri::command]
+pub fn get_ccchan_custom_pet_dir_statuses(
+    service: State<'_, Arc<CCChanService>>,
+) -> AppResult<Vec<CustomPetDirStatus>> {
+    debug!("cmd::get_ccchan_custom_pet_dir_statuses");
+    Ok(service.custom_pet_dir_statuses())
 }
 
 #[tauri::command]

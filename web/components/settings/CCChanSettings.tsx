@@ -16,6 +16,7 @@ import type {
   CCChanPetInstallPreview,
   CCChanRolePreset,
   CCChanSettings as CCChanSettingsValue,
+  CustomPetDirStatus,
   PetMeta,
 } from "@/ccchan/types";
 
@@ -137,6 +138,8 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   const [awesomeVisibleCount, setAwesomeVisibleCount] = useState(12);
   const [awesomeLoading, setAwesomeLoading] = useState(false);
   const [awesomeInstallSlug, setAwesomeInstallSlug] = useState<string | null>(null);
+  const [customDirStatuses, setCustomDirStatuses] = useState<CustomPetDirStatus[]>([]);
+  const [customDirStatusLoading, setCustomDirStatusLoading] = useState(false);
   const selectedWorkspace = useWorkspacesStore((state) => state.selectedWorkspace());
   const selectedProject = useWorkspacesStore((state) => state.selectedProject());
   const petOptions = pets.length > 0 ? pets : [FALLBACK_PET];
@@ -306,6 +309,19 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     }
     update("customPetDirs", [...value.customPetDirs, nextDir]);
     toast.success("已添加额外宠物目录，保存后生效");
+  }
+
+  async function refreshCustomPetDirStatuses() {
+    setCustomDirStatusLoading(true);
+    try {
+      const statuses = await invoke<CustomPetDirStatus[]>("get_ccchan_custom_pet_dir_statuses");
+      setCustomDirStatuses(statuses);
+      toast.success("额外宠物目录已检查");
+    } catch (error) {
+      toast.error(`检查额外宠物目录失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCustomDirStatusLoading(false);
+    }
   }
 
   async function installFromUrl() {
@@ -698,9 +714,14 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
             <Label>额外宠物目录</Label>
-            <Button type="button" size="sm" variant="ghost" onClick={() => void addCustomPetDir()}>
-              添加目录
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="button" size="sm" variant="ghost" onClick={() => void refreshCustomPetDirStatuses()} disabled={customDirStatusLoading}>
+                {customDirStatusLoading ? "检查中..." : "检查目录"}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => void addCustomPetDir()}>
+                添加目录
+              </Button>
+            </div>
           </div>
           <textarea
             value={value.customPetDirs.join("\n")}
@@ -712,6 +733,18 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
             用于手动接入 Codex Home、WSL UNC 或其他本地宠物目录；这些目录只读，不会被“删除用户宠物”影响。
           </p>
+          {customDirStatuses.length > 0 && (
+            <div className="flex max-h-32 flex-col gap-1 overflow-y-auto rounded-md border p-2 text-[11px]" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
+              {customDirStatuses.map((item) => (
+                <div key={item.path} className="flex items-start justify-between gap-3">
+                  <span className="min-w-0 truncate font-mono" style={{ color: "var(--app-text-secondary)" }}>{item.path}</span>
+                  <span className="shrink-0 text-right" style={{ color: item.status === "ready" ? "var(--app-success-text, #68d391)" : "var(--app-warning-text, #f6ad55)" }}>
+                    {item.status} · {item.petCount} · {item.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {PET_RESOURCE_LINKS.map((link) => (

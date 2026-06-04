@@ -52,6 +52,13 @@ export interface CCChanPetInstallPreview {
   sourcePath: string;
 }
 
+export interface CustomPetDirStatus {
+  path: string;
+  status: "ready" | "warning" | "missing" | "invalid" | "empty" | string;
+  petCount: number;
+  message: string;
+}
+
 export interface AwesomeCodexPetEntry {
   slug: string;
   name: string;

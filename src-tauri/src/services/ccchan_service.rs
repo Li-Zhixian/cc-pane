@@ -121,6 +121,15 @@ pub struct PetInstallPreview {
     pub source_path: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomPetDirStatus {
+    pub path: String,
+    pub status: String,
+    pub pet_count: usize,
+    pub message: String,
+}
+
 #[derive(Debug)]
 struct PetInstallLink {
     name: String,
@@ -479,6 +488,14 @@ impl CCChanService {
         let pet = self.install_pet_dir(&pet_dir)?;
         self.emit_settings_updated();
         Ok(pet)
+    }
+
+    pub fn custom_pet_dir_statuses(&self) -> Vec<CustomPetDirStatus> {
+        self.settings()
+            .custom_pet_dirs
+            .iter()
+            .map(|dir| custom_pet_dir_status(Path::new(dir), dir))
+            .collect()
     }
 
     pub fn delete_user_pet(&self, pet_id: String) -> AppResult<()> {
@@ -1224,6 +1241,99 @@ fn merge_pet_by_source_rank(pets: &mut HashMap<String, PetMeta>, pet: PetMeta) {
         .is_none_or(|existing| source_rank(pet.source) < source_rank(existing.source));
     if should_insert {
         pets.insert(pet.id.clone(), pet);
+    }
+}
+
+fn custom_pet_dir_status(root: &Path, original_path: &str) -> CustomPetDirStatus {
+    if !root.exists() {
+        return CustomPetDirStatus {
+            path: original_path.to_string(),
+            status: "missing".to_string(),
+            pet_count: 0,
+            message: "目录不存在".to_string(),
+        };
+    }
+    if !root.is_dir() {
+        return CustomPetDirStatus {
+            path: original_path.to_string(),
+            status: "invalid".to_string(),
+            pet_count: 0,
+            message: "路径不是目录".to_string(),
+        };
+    }
+    if root.join("pet.json").exists() {
+        return match load_pet_from_dir(root, PetSource::Custom) {
+            Ok(pet) => CustomPetDirStatus {
+                path: original_path.to_string(),
+                status: "ready".to_string(),
+                pet_count: 1,
+                message: format!("单个宠物目录：{} ({})", pet.display_name, pet.id),
+            },
+            Err(error) => CustomPetDirStatus {
+                path: original_path.to_string(),
+                status: "invalid".to_string(),
+                pet_count: 0,
+                message: error.to_string(),
+            },
+        };
+    }
+
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return CustomPetDirStatus {
+                path: original_path.to_string(),
+                status: "invalid".to_string(),
+                pet_count: 0,
+                message: format!("无法读取目录: {error}"),
+            };
+        }
+    };
+    let mut pet_count = 0usize;
+    let mut invalid_count = 0usize;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            invalid_count = invalid_count.saturating_add(1);
+            continue;
+        };
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("pet.json").exists() {
+            continue;
+        }
+        match load_pet_from_dir(&path, PetSource::Custom) {
+            Ok(_) => pet_count = pet_count.saturating_add(1),
+            Err(_) => invalid_count = invalid_count.saturating_add(1),
+        }
+    }
+    if pet_count > 0 {
+        return CustomPetDirStatus {
+            path: original_path.to_string(),
+            status: if invalid_count > 0 {
+                "warning"
+            } else {
+                "ready"
+            }
+            .to_string(),
+            pet_count,
+            message: if invalid_count > 0 {
+                format!("发现 {pet_count} 个可用宠物，另有 {invalid_count} 个无效宠物目录")
+            } else {
+                format!("发现 {pet_count} 个可用宠物")
+            },
+        };
+    }
+    CustomPetDirStatus {
+        path: original_path.to_string(),
+        status: "empty".to_string(),
+        pet_count: 0,
+        message: if invalid_count > 0 {
+            format!("未发现可用宠物，另有 {invalid_count} 个无效宠物目录")
+        } else {
+            "未发现 pet.json；可选择单个宠物目录或包含多个宠物子目录的父目录".to_string()
+        },
     }
 }
 
@@ -2204,6 +2314,29 @@ mod tests {
         assert_eq!(pets.len(), 1);
         assert_eq!(pets[0].id, "single");
         assert_eq!(pets[0].source, PetSource::Custom);
+    }
+
+    #[test]
+    fn custom_pet_dir_status_reports_single_parent_and_missing_dirs() {
+        let temp = tempdir().expect("tempdir");
+        let single = temp.path().join("single");
+        let parent = temp.path().join("parent");
+        write_minimal_pet(&single, "single");
+        write_minimal_pet(&parent.join("one"), "one");
+        write_minimal_pet(&parent.join("two"), "two");
+
+        let single_status = custom_pet_dir_status(&single, "/pets/single");
+        assert_eq!(single_status.status, "ready");
+        assert_eq!(single_status.pet_count, 1);
+        assert!(single_status.message.contains("single"));
+
+        let parent_status = custom_pet_dir_status(&parent, "/pets/parent");
+        assert_eq!(parent_status.status, "ready");
+        assert_eq!(parent_status.pet_count, 2);
+
+        let missing_status = custom_pet_dir_status(&temp.path().join("missing"), "/pets/missing");
+        assert_eq!(missing_status.status, "missing");
+        assert_eq!(missing_status.pet_count, 0);
     }
 
     #[test]

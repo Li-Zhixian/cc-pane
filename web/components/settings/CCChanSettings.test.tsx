@@ -149,6 +149,7 @@ describe("CCChanSettings", () => {
       }
       if (cmd === "install_ccchan_pet_from_path") return Promise.resolve(undefined);
       if (cmd === "install_ccchan_pet_from_source") return Promise.resolve(undefined);
+      if (cmd === "get_ccchan_custom_pet_dir_statuses") return Promise.resolve([]);
       if (cmd === "delete_ccchan_user_pet") return Promise.resolve(undefined);
       if (cmd === "save_ccchan_settings") return Promise.resolve(undefined);
       return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
@@ -465,6 +466,31 @@ describe("CCChanSettings", () => {
       expect(toast.success).toHaveBeenCalledWith("该宠物目录已存在");
     });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("checks custom pet source directory statuses", async () => {
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      if (cmd === "get_ccchan_custom_pet_dir_statuses") {
+        return Promise.resolve([
+          { path: "/mnt/d/shared-pets", status: "ready", petCount: 2, message: "发现 2 个可用宠物" },
+          { path: "/mnt/d/missing", status: "missing", petCount: 0, message: "目录不存在" },
+        ]);
+      }
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings({
+      ...DEFAULT_CCCHAN_SETTINGS,
+      customPetDirs: ["/mnt/d/shared-pets", "/mnt/d/missing"],
+    });
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "检查目录" }));
+
+    expect(await screen.findByText("/mnt/d/shared-pets")).toBeInTheDocument();
+    expect(screen.getByText(/ready · 2 · 发现 2 个可用宠物/)).toBeInTheDocument();
+    expect(screen.getByText(/missing · 0 · 目录不存在/)).toBeInTheDocument();
   });
 
   it("installs a custom source pet into the user pet directory", async () => {
