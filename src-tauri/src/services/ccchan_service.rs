@@ -460,6 +460,14 @@ impl CCChanService {
         result
     }
 
+    pub fn install_pet_from_source(&self, pet_id: String, source: String) -> AppResult<PetMeta> {
+        let source = parse_readonly_pet_source(&source)?;
+        let pet_dir = self.find_readonly_pet_dir(&pet_id, source)?;
+        let pet = self.install_pet_dir(&pet_dir)?;
+        self.emit_settings_updated();
+        Ok(pet)
+    }
+
     pub fn delete_user_pet(&self, pet_id: String) -> AppResult<()> {
         let requested_pet_id = pet_id.trim().to_string();
         let pet_dir_name = sanitized_pet_dir_name(&requested_pet_id)?;
@@ -674,6 +682,9 @@ impl CCChanService {
         if !root.exists() {
             return Ok(Vec::new());
         }
+        if root.join("pet.json").exists() {
+            return Ok(vec![load_pet_from_dir(root, source)?]);
+        }
         let mut pets = Vec::new();
         for entry in std::fs::read_dir(root).map_err(|error| {
             AppError::from(format!(
@@ -695,6 +706,50 @@ impl CCChanService {
             }
         }
         Ok(pets)
+    }
+
+    fn find_readonly_pet_dir(&self, pet_id: &str, source: PetSource) -> AppResult<PathBuf> {
+        let requested_pet_id = pet_id.trim();
+        if requested_pet_id.is_empty() {
+            return Err(AppError::from("ccchan pet id is required"));
+        }
+        match source {
+            PetSource::Custom => {
+                for dir in &self.settings().custom_pet_dirs {
+                    if let Some(path) = find_pet_dir_by_id_in_root(
+                        Path::new(dir),
+                        PetSource::Custom,
+                        requested_pet_id,
+                    )? {
+                        return Ok(path);
+                    }
+                }
+                Err(AppError::NotFound(format!(
+                    "ccchan custom pet '{}' not found",
+                    requested_pet_id
+                )))
+            }
+            PetSource::CodexHome => {
+                let Some(codex_pets_dir) = codex_home_pets_dir() else {
+                    return Err(AppError::NotFound(
+                        "Codex Home pets directory was not found".to_string(),
+                    ));
+                };
+                find_pet_dir_by_id_in_root(&codex_pets_dir, PetSource::CodexHome, requested_pet_id)?
+                    .ok_or_else(|| {
+                        AppError::NotFound(format!(
+                            "ccchan Codex Home pet '{}' not found",
+                            requested_pet_id
+                        ))
+                    })
+            }
+            PetSource::Builtin => Err(AppError::from(
+                "Bundled ccchan pets are already available and cannot be installed from source",
+            )),
+            PetSource::User => Err(AppError::from(
+                "User-installed ccchan pets are already installed",
+            )),
+        }
     }
 
     fn install_pet_dir(&self, pet_root: &Path) -> AppResult<PetMeta> {
@@ -1149,6 +1204,52 @@ fn merge_pet_by_source_rank(pets: &mut HashMap<String, PetMeta>, pet: PetMeta) {
     if should_insert {
         pets.insert(pet.id.clone(), pet);
     }
+}
+
+fn parse_readonly_pet_source(source: &str) -> AppResult<PetSource> {
+    match source.trim() {
+        "custom" => Ok(PetSource::Custom),
+        "codexHome" => Ok(PetSource::CodexHome),
+        other => Err(AppError::from(format!(
+            "ccchan can only install from readonly custom or codexHome pet sources, got '{}'",
+            other
+        ))),
+    }
+}
+
+fn find_pet_dir_by_id_in_root(
+    root: &Path,
+    source: PetSource,
+    requested_pet_id: &str,
+) -> AppResult<Option<PathBuf>> {
+    if !root.exists() {
+        return Ok(None);
+    }
+    if root.join("pet.json").exists() {
+        let pet = load_pet_from_dir(root, source)?;
+        return Ok((pet.id == requested_pet_id).then(|| root.to_path_buf()));
+    }
+    for entry in std::fs::read_dir(root).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read pet directory {}: {}",
+            root.display(),
+            error
+        ))
+    })? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        match load_pet_from_dir(&path, source) {
+            Ok(pet) if pet.id == requested_pet_id => return Ok(Some(path)),
+            Ok(_) => {}
+            Err(error) => {
+                warn!(path = %path.display(), error = %error, "skipping invalid ccchan pet")
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn find_pet_root(path: &Path) -> AppResult<PathBuf> {
@@ -1950,6 +2051,70 @@ mod tests {
         merge_pet_by_source_rank(&mut pets, pet_meta("same", "Second", PetSource::Custom));
 
         assert_eq!(pets["same"].display_name, "First");
+    }
+
+    #[test]
+    fn load_pet_dir_children_accepts_single_pet_root() {
+        let temp = tempdir().expect("tempdir");
+        let pet_dir = temp.path().join("single");
+        write_minimal_pet(&pet_dir, "single");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(
+                temp.path().join("data").to_string_lossy().to_string(),
+            ))),
+        );
+
+        let pets = service
+            .load_pet_dir_children(&pet_dir, PetSource::Custom)
+            .expect("load single root");
+
+        assert_eq!(pets.len(), 1);
+        assert_eq!(pets[0].id, "single");
+        assert_eq!(pets[0].source, PetSource::Custom);
+    }
+
+    #[test]
+    fn install_pet_from_source_copies_custom_pet_into_user_dir() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let custom_root = temp.path().join("custom-pets");
+        write_minimal_pet(&custom_root.join("sample"), "sample");
+        let settings_service = Arc::new(SettingsService::new());
+        let mut settings = settings_service.get_settings();
+        settings.ccchan.custom_pet_dirs = vec![custom_root.to_string_lossy().to_string()];
+        settings_service
+            .update_settings(settings)
+            .expect("save settings");
+        let service = CCChanService::new(
+            settings_service,
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let pet = service
+            .install_pet_from_source("sample".to_string(), "custom".to_string())
+            .expect("install custom source pet");
+
+        assert_eq!(pet.id, "sample");
+        assert_eq!(pet.source, PetSource::User);
+        assert!(data_dir.join("ccchan").join("pets").join("sample").exists());
+    }
+
+    #[test]
+    fn install_pet_from_source_rejects_non_readonly_sources() {
+        let temp = tempdir().expect("tempdir");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(
+                temp.path().join("data").to_string_lossy().to_string(),
+            ))),
+        );
+
+        let error = service
+            .install_pet_from_source("sample".to_string(), "user".to_string())
+            .expect_err("user source should be rejected");
+
+        assert!(error.to_string().contains("readonly custom or codexHome"));
     }
 
     #[test]

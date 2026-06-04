@@ -70,6 +70,8 @@ Pets are discovered from:
 
 Duplicate ids are resolved in this order: user installs, bundled pets, custom directories, Codex Home.
 
+Custom directories may point either at a parent folder containing multiple pet folders or at one concrete pet folder containing `pet.json`. Pets discovered from custom directories and Codex Home remain read-only in place, but the settings UI can copy one into the user install directory so it becomes a normal managed CC-Panes pet.
+
 ## Installing Pets
 
 The ccchan settings panel supports:
@@ -79,7 +81,7 @@ The ccchan settings panel supports:
 - URL install: downloads an HTTPS zip package, or imports a pasted `codex://pets/install?name=&imageUrl=` / `ccpanes://pets/install?name=&imageUrl=` link by downloading the HTTPS `imageUrl` into a single-frame ccchan pet package. Both paths stage into `<data-dir>/ccchan/pet-staging`, preview metadata, then install after confirmation.
 - Awesome Codex Pet catalog: loads `awesome-codex-pet`'s public `pets.json`, supports search by name, author, category, license, or slug, stages the selected pet from GitHub raw assets, previews metadata, then installs after confirmation.
 - User pet management: lists and deletes pets installed under `<data-dir>/ccchan/pets`; bundled and Codex Home pets are read-only from this UI.
-- Custom directory source management: users can either type one read-only directory per line or use a directory picker to append another pet source, so local Codex Home mirrors, WSL UNC folders, and manually curated community pet folders can be added without hand-copying paths.
+- Custom directory source management: users can either type one read-only directory per line or use a directory picker to append another pet source, so local Codex Home mirrors, WSL UNC folders, and manually curated community pet folders can be added without hand-copying paths. Custom and Codex Home pets can also be copied into the user install directory from settings.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
 URL installs require `https://`, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.

@@ -16,6 +16,7 @@ import type {
   CCChanPetInstallPreview,
   CCChanRolePreset,
   CCChanSettings as CCChanSettingsValue,
+  PetMeta,
 } from "@/ccchan/types";
 
 interface CCChanSettingsProps {
@@ -105,6 +106,12 @@ function resolveWslTargetPath(path?: string | null): string | null {
   return toWslPath(trimmed);
 }
 
+type ReadonlyInstallablePet = PetMeta & { source: "custom" | "codexHome" };
+
+function isReadonlyInstallablePet(pet: PetMeta): pet is ReadonlyInstallablePet {
+  return pet.source === "custom" || pet.source === "codexHome";
+}
+
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
@@ -154,6 +161,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       : awesomePets;
     return source.slice(0, 12);
   }, [awesomePets, awesomeQuery]);
+  const readonlyInstallablePets = petOptions.filter(isReadonlyInstallablePet);
 
   useEffect(() => {
     void load();
@@ -314,6 +322,23 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       toast.success("桌宠已删除");
     } catch (error) {
       toast.error(`删除失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function installReadonlyPet(petId: string, source: "custom" | "codexHome") {
+    const pet = petOptions.find((item) => item.id === petId && item.source === source);
+    if (!pet) return;
+    const confirmed = await confirmCCChanAction(
+      `把 "${pet.displayName}" (${pet.id}) 安装到用户宠物目录？`,
+      { okLabel: "安装" },
+    );
+    if (!confirmed) return;
+    try {
+      await invoke("install_ccchan_pet_from_source", { petId: pet.id, source });
+      await load();
+      toast.success("桌宠已安装到用户目录");
+    } catch (error) {
+      toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -741,6 +766,24 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
                 <Button type="button" size="sm" variant="ghost" onClick={() => void deleteUserPet(pet.id)}>
                   <Trash2 size={13} />
                   删除
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {readonlyInstallablePets.length > 0 && (
+          <div className="flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
+            <div className="text-[12px] font-medium" style={{ color: "var(--app-text-primary)" }}>
+              可安装的外部宠物
+            </div>
+            {readonlyInstallablePets.map((pet) => (
+              <div key={`${pet.source}:${pet.id}`} className="flex items-center justify-between gap-3 rounded px-2 py-1 text-[12px]" style={{ color: "var(--app-text-primary)" }}>
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{pet.displayName}</span>
+                  <span className="block truncate" style={{ color: "var(--app-text-tertiary)" }}>{pet.id} · {pet.source}</span>
+                </span>
+                <Button type="button" size="sm" variant="ghost" onClick={() => void installReadonlyPet(pet.id, pet.source)}>
+                  安装到用户目录
                 </Button>
               </div>
             ))}

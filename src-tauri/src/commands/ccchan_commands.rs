@@ -229,6 +229,16 @@ pub fn install_ccchan_pet_from_path(
 }
 
 #[tauri::command]
+pub fn install_ccchan_pet_from_source(
+    service: State<'_, Arc<CCChanService>>,
+    pet_id: String,
+    source: String,
+) -> AppResult<PetMeta> {
+    debug!(pet_id = %pet_id, source = %source, "cmd::install_ccchan_pet_from_source");
+    service.install_pet_from_source(pet_id, source)
+}
+
+#[tauri::command]
 pub fn delete_ccchan_user_pet(
     service: State<'_, Arc<CCChanService>>,
     pet_id: String,

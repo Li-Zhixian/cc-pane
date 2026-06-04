@@ -46,6 +46,16 @@ const userPet: PetMeta = {
   animations: { idle: { row: 0, frames: 1, fps: 1 } },
 };
 
+const customSourcePet: PetMeta = {
+  id: "external-pet",
+  displayName: "External Pet",
+  description: "Custom source pet",
+  spritesheetUrl: "asset://external-pet",
+  source: "custom",
+  atlas: { cellW: 192, cellH: 208, cols: 8, rows: 9 },
+  animations: { idle: { row: 0, frames: 1, fps: 1 } },
+};
+
 const awesomePet: AwesomeCodexPetEntry = {
   slug: "firefly--lingxiaotian",
   name: "Firefly",
@@ -124,6 +134,7 @@ describe("CCChanSettings", () => {
         return Promise.resolve(undefined);
       }
       if (cmd === "install_ccchan_pet_from_path") return Promise.resolve(undefined);
+      if (cmd === "install_ccchan_pet_from_source") return Promise.resolve(undefined);
       if (cmd === "delete_ccchan_user_pet") return Promise.resolve(undefined);
       if (cmd === "save_ccchan_settings") return Promise.resolve(undefined);
       return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
@@ -323,6 +334,35 @@ describe("CCChanSettings", () => {
       "/mnt/d/shared-pets",
       "/home/dev/.codex/pets",
     ]);
+  });
+
+  it("installs a custom source pet into the user pet directory", async () => {
+    useCCChanStore.setState({
+      settings: DEFAULT_CCCHAN_SETTINGS,
+      pets: [doroPet, customSourcePet],
+      loaded: true,
+    });
+    vi.mocked(invoke).mockImplementation((cmd, args) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet, customSourcePet]);
+      if (cmd === "install_ccchan_pet_from_source") {
+        expect(args).toEqual({ petId: customSourcePet.id, source: "custom" });
+        return Promise.resolve(undefined);
+      }
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "安装到用户目录" }));
+
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(
+        "把 \"External Pet\" (external-pet) 安装到用户宠物目录？",
+        expect.objectContaining({ okLabel: "安装" }),
+      );
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_source", { petId: "external-pet", source: "custom" });
+    });
   });
 
   it("previews a selected pet zip and installs it from staging", async () => {
