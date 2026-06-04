@@ -189,6 +189,63 @@ describe("ChatPanel", () => {
     expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "start_ccchan_chat")).toHaveLength(2);
   });
 
+  it("restarts the active WSL chat when remote path or distro changes", async () => {
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "stop_ccchan_chat") return Promise.resolve(undefined);
+      if (cmd === "start_ccchan_chat") return Promise.resolve("new-wsl-session");
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    const changedWslRole: CCChanRolePreset = {
+      ...wslRole,
+      wslRemotePath: "/mnt/d/my-project/cc-pane-worktree",
+      wslDistro: "Ubuntu",
+    };
+    const changedSettings: CCChanSettings = {
+      ...makeSettings(changedWslRole.id),
+      roles: [defaultRole, changedWslRole],
+    };
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings(wslRole.id)}
+        sessionId="old-wsl-session"
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <ChatPanel
+        settings={changedSettings}
+        sessionId="old-wsl-session"
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(invoke).toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "old-wsl-session" });
+    expect(onSessionIdChange).toHaveBeenCalledWith(null);
+
+    rerender(
+      <ChatPanel
+        settings={changedSettings}
+        sessionId={null}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith("new-wsl-session");
+    });
+    expect(invoke).toHaveBeenCalledWith("start_ccchan_chat", {
+      aiEngine: "codex",
+      systemPrompt: "Use Codex inside WSL.",
+      runtimeKind: "wsl",
+      wslRemotePath: "/mnt/d/my-project/cc-pane-worktree",
+      wslDistro: "Ubuntu",
+    });
+  });
+
   it("keeps the active session when the role changes while hidden", () => {
     const onSessionIdChange = vi.fn();
     vi.mocked(invoke).mockResolvedValue(undefined);

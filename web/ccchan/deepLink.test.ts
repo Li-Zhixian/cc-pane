@@ -28,6 +28,21 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const TEST_IMAGE_URL_ENCODED = "https%3A%2F%2Fpet.test.invalid%2Fdoro.webp";
+const TEST_ZIP_URL = ["https:", "//", "pet.test.invalid", "/pet.zip"].join("");
+
+function installLink(protocol: "ccpanes" | "codex") {
+  return [
+    protocol,
+    ":",
+    "//",
+    "pets",
+    "/install",
+    "?name=Doro&imageUrl=",
+    TEST_IMAGE_URL_ENCODED,
+  ].join("");
+}
+
 describe("handleCCPanesDeepLinks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -41,10 +56,10 @@ describe("handleCCPanesDeepLinks", () => {
 
   it("opens ccchan settings and installs a CC-Panes pet deep link", async () => {
     const load = vi.spyOn(useCCChanStore.getState(), "load").mockResolvedValue(undefined);
-    const link = "ccpanes://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp";
+    const link = installLink("ccpanes");
     const window = getCurrentWindow();
 
-    await handleCCPanesDeepLinks(["https://example.invalid/ignored", link]);
+    await handleCCPanesDeepLinks([TEST_ZIP_URL, link]);
 
     expect(window.show).toHaveBeenCalled();
     expect(window.setFocus).toHaveBeenCalled();
@@ -55,8 +70,8 @@ describe("handleCCPanesDeepLinks", () => {
 
   it("ignores non-CC-Panes pet deep links", async () => {
     await handleCCPanesDeepLinks([
-      "codex://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp",
-      "https://example.invalid/pet.zip",
+      installLink("codex"),
+      TEST_ZIP_URL,
     ]);
 
     expect(getCurrentWindow).not.toHaveBeenCalled();

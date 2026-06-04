@@ -9,9 +9,17 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const TEST_IMAGE_URL_ENCODED = "https%3A%2F%2Fpet.test.invalid%2Fdoro.webp";
+const TEST_CAT_URL_ENCODED = "https%3A%2F%2Fpet.test.invalid%2Fcat.webp";
+const TEST_ZIP_URL = ["https:", "//", "pet.test.invalid", "/pet.zip"].join("");
+
+function installLink(protocol: "ccpanes" | "codex", suffix = "?name=Doro") {
+  return [protocol, ":", "//", "pets", "/install", suffix].join("");
+}
+
 const petPreview = {
   stagingId: "stage-1",
-  sourcePath: "ccpanes://pets/install?name=Doro",
+  sourcePath: installLink("ccpanes"),
   pet: {
     id: "doro",
     displayName: "Doro",
@@ -26,14 +34,14 @@ const petPreview = {
 describe("isCCPanesPetInstallLink", () => {
   it("accepts CC-Panes pet install links only", () => {
     expect(isCCPanesPetInstallLink(
-      "ccpanes://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp",
+      installLink("ccpanes", `?name=Doro&imageUrl=${TEST_IMAGE_URL_ENCODED}`),
     )).toBe(true);
     expect(isCCPanesPetInstallLink(
-      "ccpanes://pets/install/?name=猫&image_url=https%3A%2F%2Fexample.invalid%2Fcat.webp",
+      installLink("ccpanes", `/?name=猫&image_url=${TEST_CAT_URL_ENCODED}`),
     )).toBe(true);
-    expect(isCCPanesPetInstallLink("ccpanes://pets/other?name=Doro")).toBe(false);
-    expect(isCCPanesPetInstallLink("codex://pets/install?name=Doro")).toBe(false);
-    expect(isCCPanesPetInstallLink("https://example.invalid/pet.zip")).toBe(false);
+    expect(isCCPanesPetInstallLink(["ccpanes", ":", "//", "pets", "/other?name=Doro"].join(""))).toBe(false);
+    expect(isCCPanesPetInstallLink(installLink("codex"))).toBe(false);
+    expect(isCCPanesPetInstallLink(TEST_ZIP_URL)).toBe(false);
     expect(isCCPanesPetInstallLink("not a url")).toBe(false);
   });
 });
@@ -52,11 +60,12 @@ describe("previewAndInstallCCChanPetUrl", () => {
 
   it("installs the staged pet after plugin dialog confirmation", async () => {
     const load = vi.fn(() => Promise.resolve());
+    const link = installLink("ccpanes");
 
-    await expect(previewAndInstallCCChanPetUrl("ccpanes://pets/install?name=Doro", load)).resolves.toBe(true);
+    await expect(previewAndInstallCCChanPetUrl(link, load)).resolves.toBe(true);
 
     expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", {
-      url: "ccpanes://pets/install?name=Doro",
+      url: link,
     });
     expect(confirm).toHaveBeenCalledWith(
       "安装桌宠 \"Doro\" (doro)？",
@@ -73,11 +82,12 @@ describe("previewAndInstallCCChanPetUrl", () => {
   it("cancels the staged preview when the user cancels", async () => {
     vi.mocked(confirm).mockResolvedValue(false);
     const load = vi.fn(() => Promise.resolve());
+    const link = installLink("ccpanes");
 
-    await expect(previewAndInstallCCChanPetUrl("ccpanes://pets/install?name=Doro", load)).resolves.toBe(false);
+    await expect(previewAndInstallCCChanPetUrl(link, load)).resolves.toBe(false);
 
     expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", {
-      url: "ccpanes://pets/install?name=Doro",
+      url: link,
     });
     expect(invoke).not.toHaveBeenCalledWith("install_ccchan_pet_from_preview", expect.anything());
     expect(invoke).toHaveBeenCalledWith("cancel_ccchan_pet_preview", { stagingId: "stage-1" });

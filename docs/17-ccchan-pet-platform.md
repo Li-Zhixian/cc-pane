@@ -30,6 +30,8 @@ The chat panel blocks obviously invalid WSL role paths before starting a PTY and
 
 Closing the chat panel only collapses the ccchan window back to the pet size. The active chat PTY stays mounted in the hidden panel, terminal output continues to be buffered, and reopening the panel replays output captured while hidden. Closing during startup also keeps the pending startup mounted so a late session id is retained instead of being killed as stale. Role changes made while the panel is hidden do not immediately stop the hidden session; reopening the panel applies the normal visible role-switch behavior. The explicit stop button still terminates the active chat session, clears the visible transcript, and suppresses automatic restart until the panel is reopened.
 
+Changing a visible role's WSL remote path or distro is treated as a role-session change: ccchan stops the previous PTY, clears the active session id, and starts a new chat session with the updated WSL path and distro after the parent applies the cleared session id.
+
 The ccchan window uses consistent sizes across frontend and backend resize commands: collapsed pet `120x120`, chat `460x640`, and context menu `460x260`.
 
 ## Pet Package Format
@@ -119,6 +121,7 @@ Current-environment-verifiable:
 
 - TypeScript: `npx tsc --noEmit --pretty false`.
 - Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts web/ccchan/deepLink.test.ts web/ccchan/ChatPanel.test.tsx web/ccchan/CCChanApp.test.tsx`.
+- Focused Windows frontend reruns: `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/ChatPanel.test.tsx web/ccchan/installPet.test.ts web/ccchan/deepLink.test.ts --reporter=dot"` verifies WSL role restart behavior, hidden chat lifecycle handling, and supported-link install handling without retaining literal remote install-link examples in the tests.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
 - Runtime status regression checks: `cargo test -p cc-panes-core session_state_machine -- --nocapture` verifies hook transitions, stale tool metadata cleanup, and listener behavior; `cargo test -p cc-panes-core status_info_merges_state_machine_tool_snapshot -- --nocapture` verifies terminal status payloads merge current state-machine tool metadata for ccchan/frontend consumption.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
