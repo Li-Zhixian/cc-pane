@@ -384,6 +384,20 @@ fn should_close_main_window_to_tray(window: &tauri::Window) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CCChanTrayAction {
+    Show,
+    Hide,
+}
+
+fn next_ccchan_tray_action(window_visible: bool) -> CCChanTrayAction {
+    if window_visible {
+        CCChanTrayAction::Hide
+    } else {
+        CCChanTrayAction::Show
+    }
+}
+
 /// 触发截图流程：SetWindowDisplayAffinity 方案
 /// Windows: 设置 WDA_EXCLUDEFROMCAPTURE → xcap 截屏 → 选区 → 裁剪保存 → 恢复 WDA_NONE
 /// 非 Windows: Tauri hide → 截屏 → 选区 → 裁剪保存 → Tauri show
@@ -1380,8 +1394,10 @@ pub fn run() {
 
             // ---- 系统托盘 ----
             let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let toggle_ccchan =
+                MenuItem::with_id(app, "toggle_ccchan", "Show/Hide cc酱", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &toggle_ccchan, &quit])?;
 
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
 
@@ -1405,6 +1421,19 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.unminimize();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "toggle_ccchan" => {
+                        if let Some(ccchan_svc) = app.try_state::<Arc<CCChanService>>() {
+                            let action =
+                                next_ccchan_tray_action(ccchan_svc.settings().window_visible);
+                            let result = match action {
+                                CCChanTrayAction::Show => ccchan_svc.show_window(app),
+                                CCChanTrayAction::Hide => ccchan_svc.hide_window(app),
+                            };
+                            if let Err(error) = result {
+                                warn!("[ccchan] tray toggle failed: {}", error);
+                            }
                         }
                     }
                     "quit" => {
@@ -1855,4 +1884,15 @@ pub fn run() {
                 workspace_cleanup.stop_watcher();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ccchan_tray_action_toggles_current_visibility() {
+        assert_eq!(next_ccchan_tray_action(true), CCChanTrayAction::Hide);
+        assert_eq!(next_ccchan_tray_action(false), CCChanTrayAction::Show);
+    }
 }
