@@ -137,6 +137,7 @@ pub struct CCChanService {
     settings_service: Arc<SettingsService>,
     app_paths: Arc<AppPaths>,
     app_handle: Mutex<Option<AppHandle>>,
+    chat_lifecycle_lock: Mutex<()>,
     chat_session_id: Mutex<Option<String>>,
 }
 
@@ -146,6 +147,7 @@ impl CCChanService {
             settings_service,
             app_paths,
             app_handle: Mutex::new(None),
+            chat_lifecycle_lock: Mutex::new(()),
             chat_session_id: Mutex::new(None),
         }
     }
@@ -513,6 +515,10 @@ impl CCChanService {
         wsl_remote_path: Option<String>,
         wsl_distro: Option<String>,
     ) -> AppResult<String> {
+        let _lifecycle = self
+            .chat_lifecycle_lock
+            .lock()
+            .map_err(|_| AppError::from("ccchan chat lifecycle lock poisoned"))?;
         let cli_tool = parse_ai_engine(&ai_engine)?;
         let chat_dir = self.app_paths.data_dir().join("ccchan");
         std::fs::create_dir_all(&chat_dir).map_err(|error| {
@@ -579,6 +585,10 @@ impl CCChanService {
         terminal_service: Arc<TerminalService>,
         session_id: &str,
     ) -> AppResult<()> {
+        let _lifecycle = self
+            .chat_lifecycle_lock
+            .lock()
+            .map_err(|_| AppError::from("ccchan chat lifecycle lock poisoned"))?;
         self.clear_chat_session_id(session_id)?;
         match terminal_service.kill(session_id) {
             Ok(()) => Ok(()),

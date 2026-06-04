@@ -26,6 +26,8 @@ The WSL role editor can fill the active role from the currently selected workspa
 
 Role chat runtime supports `local` and explicit `wsl`. WSL chat requires a role-level `wslRemotePath` that starts with `/`; `~` paths are rejected because the Windows host must map the path to either a drive path like `D:\...` or a WSL UNC path like `\\wsl.localhost\<distro>\...` before writing project hooks. `wslDistro` is optional and falls back to the default distro. This is intentionally explicit so ccchan chat can run Claude Code or Codex from the same WSL project path the user expects, instead of silently guessing from the host data directory.
 
+The chat panel blocks obviously invalid WSL role paths before starting a PTY and formats startup failures into actionable CLI, WSL, MCP, or provider/auth hints. The backend serializes ccchan chat start/stop lifecycle operations so rapid role switches or a stop request during startup cannot interleave session id mutation with PTY kill/create.
+
 The ccchan window uses consistent sizes across frontend and backend resize commands: collapsed pet `120x120`, chat `460x640`, and context menu `460x260`.
 
 ## Pet Package Format

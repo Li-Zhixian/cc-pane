@@ -11,6 +11,36 @@ interface ChatPanelProps {
   onClose: () => void;
 }
 
+function validateChatStartup(runtimeKind: string, wslRemotePath: string | null): string | null {
+  if (runtimeKind !== "wsl") return null;
+  const remotePath = wslRemotePath?.trim() ?? "";
+  if (!remotePath) return "WSL chat 需要先在 cc酱角色设置里填写 WSL 远端路径。";
+  if (!remotePath.startsWith("/")) return `WSL 远端路径必须以 / 开头：${remotePath}`;
+  return null;
+}
+
+export function formatChatStartupError(error: unknown, aiEngine: string, runtimeKind: string): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const text = raw.trim() || "未知错误";
+  const lower = text.toLowerCase();
+  const engineLabel = aiEngine === "codex" ? "Codex" : aiEngine === "claude" ? "Claude Code" : aiEngine;
+  const runtimeLabel = runtimeKind === "wsl" ? "WSL" : "本机";
+
+  if (lower.includes("not found") || lower.includes("no such file") || lower.includes("command not found")) {
+    return `${runtimeLabel} ${engineLabel} 启动失败：没有找到 CLI。请确认 ${aiEngine} 已安装，并且在该运行环境的 PATH 中可执行。原始错误：${text}`;
+  }
+  if (lower.includes("wsl") || lower.includes("remote path") || lower.includes("must start with /")) {
+    return `WSL chat 启动失败：请检查发行版、远端路径和项目 hooks 同步。原始错误：${text}`;
+  }
+  if (lower.includes("mcp")) {
+    return `${runtimeLabel} ${engineLabel} 启动失败：MCP 配置或注入异常。原始错误：${text}`;
+  }
+  if (lower.includes("provider") || lower.includes("auth") || lower.includes("login")) {
+    return `${runtimeLabel} ${engineLabel} 启动失败：provider、认证或登录状态异常。原始错误：${text}`;
+  }
+  return `${runtimeLabel} ${engineLabel} 启动失败：${text}`;
+}
+
 export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -57,6 +87,11 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
   useEffect(() => {
     async function ensureSession() {
       if (sessionId || startingRef.current) return;
+      const validationError = validateChatStartup(runtimeKind, wslRemotePath);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
       const requestedRoleSessionKey = roleSessionKey;
       startingRef.current = true;
       setStarting(true);
@@ -76,7 +111,7 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
         void invoke("stop_ccchan_chat", { sessionId: nextSessionId }).catch(() => {});
       } catch (err) {
         if (mountedRef.current && latestRoleSessionKeyRef.current === requestedRoleSessionKey) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(formatChatStartupError(err, aiEngine, runtimeKind));
         }
       } finally {
         startingRef.current = false;

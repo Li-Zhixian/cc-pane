@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ChatPanel } from "./ChatPanel";
+import { ChatPanel, formatChatStartupError } from "./ChatPanel";
 import { DEFAULT_CCCHAN_SETTINGS, DEFAULT_CCCHAN_ROLE_PROMPT } from "@/stores/useCCChanStore";
 import type { CCChanRolePreset, CCChanSettings } from "./types";
 
@@ -107,6 +107,41 @@ describe("ChatPanel", () => {
       wslRemotePath: "/mnt/d/my-project/cc-pane",
       wslDistro: "Ubuntu-24.04",
     });
+  });
+
+  it("does not start a WSL chat session with an invalid remote path", async () => {
+    const invalidWslRole: CCChanRolePreset = {
+      ...wslRole,
+      wslRemotePath: "D:\\my-project\\cc-pane",
+    };
+    const settings: CCChanSettings = {
+      ...makeSettings(invalidWslRole.id),
+      roles: [defaultRole, invalidWslRole],
+    };
+    const onSessionIdChange = vi.fn();
+    vi.mocked(invoke).mockResolvedValue("should-not-start");
+
+    render(
+      <ChatPanel
+        settings={settings}
+        sessionId={null}
+        onSessionIdChange={onSessionIdChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/WSL 远端路径必须以 \/ 开头/)).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("start_ccchan_chat", expect.anything());
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+  });
+
+  it("formats CLI startup errors with actionable context", () => {
+    expect(formatChatStartupError(new Error("program not found: codex"), "codex", "wsl")).toContain(
+      "WSL Codex 启动失败：没有找到 CLI",
+    );
+    expect(formatChatStartupError(new Error("provider auth failed"), "claude", "local")).toContain(
+      "本机 Claude Code 启动失败：provider、认证或登录状态异常",
+    );
   });
 
   it("stops stale startup sessions and retries the latest role", async () => {
