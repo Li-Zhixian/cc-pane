@@ -445,12 +445,29 @@ function Click-AutomationElement {
   }
 }
 
+function Try-ClickAutomationElement {
+  param(
+    [object]$Element,
+    [ValidateSet("Left", "Right")]
+    [string]$Button = "Left"
+  )
+
+  try {
+    Click-AutomationElement -Element $Element -Button $Button
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Open-TrayOverflowIfAvailable {
   $layoutButton = Find-TrayOverflowButtonByLayout
   if ($layoutButton) {
     $opened = Invoke-AutomationElementIfAvailable -Element $layoutButton
     if (-not $opened) {
-      Click-AutomationElement -Element $layoutButton -Button "Left"
+      if (-not (Try-ClickAutomationElement -Element $layoutButton -Button "Left")) {
+        return $false
+      }
     }
     Start-Sleep -Milliseconds 500
     return $true
@@ -465,7 +482,9 @@ function Open-TrayOverflowIfAvailable {
     if ($button) {
       $opened = Invoke-AutomationElementIfAvailable -Element $button
       if (-not $opened) {
-        Click-AutomationElement -Element $button -Button "Left"
+        if (-not (Try-ClickAutomationElement -Element $button -Button "Left")) {
+          continue
+        }
       }
       Start-Sleep -Milliseconds 500
       return $true
@@ -515,6 +534,24 @@ function Find-CCPanesTrayIcon {
     if ($icon) {
       return $icon
     }
+  }
+
+  return $null
+}
+
+function Open-CCPanesTrayMenu {
+  param([string]$Tooltip)
+
+  for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    $icon = Find-CCPanesTrayIcon -Tooltip $Tooltip
+    if (-not $icon) {
+      continue
+    }
+    if (Try-ClickAutomationElement -Element $icon -Button "Right") {
+      Start-Sleep -Milliseconds 700
+      return $icon
+    }
+    Start-Sleep -Milliseconds 250
   }
 
   return $null
@@ -699,7 +736,7 @@ function Click-NativeMenuItem {
 function Get-TrayMenuDiagnostics {
   param([string]$Tooltip)
 
-  $icon = Find-CCPanesTrayIcon -Tooltip $Tooltip
+  $icon = Open-CCPanesTrayMenu -Tooltip $Tooltip
   if (-not $icon) {
     $diagnostics = Get-TraySearchDiagnostics -Tooltip $Tooltip | ConvertTo-Json -Depth 8
     throw "Could not find a visible tray icon with tooltip containing '$Tooltip'. Search diagnostics: $diagnostics"
@@ -708,9 +745,6 @@ function Get-TrayMenuDiagnostics {
   $originalCursor = New-Object POINT
   [void][CCChanWin32Probe]::GetCursorPos([ref]$originalCursor)
   try {
-    Click-AutomationElement -Element $icon -Button "Right"
-    Start-Sleep -Milliseconds 700
-
     $menuItemName = "Show/Hide cc" + [char]0x9171
     $automationCandidates = Find-AutomationElementsByNamePart -NamePart "Show" -RootClassNames @("#32768") |
       ForEach-Object {
@@ -744,32 +778,96 @@ function Get-TrayMenuDiagnostics {
 function Invoke-CCChanTrayMenuToggle {
   param([string]$Tooltip)
 
-  $icon = Find-CCPanesTrayIcon -Tooltip $Tooltip
-  if (-not $icon) {
-    $diagnostics = Get-TraySearchDiagnostics -Tooltip $Tooltip | ConvertTo-Json -Depth 8
-    throw "Could not find a visible tray icon with tooltip containing '$Tooltip'. Search diagnostics: $diagnostics"
-  }
-
-  Click-AutomationElement -Element $icon -Button "Right"
-  Start-Sleep -Milliseconds 500
-
   $menuItemName = "Show/Hide cc" + [char]0x9171
-  $nativeMenuItem = Find-NativeTrayMenuItem -NamePart $menuItemName
-  if ($nativeMenuItem) {
-    Click-NativeMenuItem -MenuItem $nativeMenuItem
-    Start-Sleep -Milliseconds 500
-    return "win32-native-menu-item"
+  $lastDiagnostics = $null
+
+  for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    $icon = Open-CCPanesTrayMenu -Tooltip $Tooltip
+    if (-not $icon) {
+      $lastDiagnostics = Get-TraySearchDiagnostics -Tooltip $Tooltip | ConvertTo-Json -Depth 8
+      continue
+    }
+
+    $nativeMenuItem = Find-NativeTrayMenuItem -NamePart $menuItemName -TimeoutMs 1800
+    if ($nativeMenuItem) {
+      Click-NativeMenuItem -MenuItem $nativeMenuItem
+      Start-Sleep -Milliseconds 500
+      return "win32-native-menu-item"
+    }
+
+    $menuItem = Find-TrayMenuItemByNamePart -NamePart $menuItemName -TimeoutMs 1800
+    if ($menuItem -and (Try-ClickAutomationElement -Element $menuItem -Button "Left")) {
+      Start-Sleep -Milliseconds 500
+      return "uia-menu-item"
+    }
+
+    $lastDiagnostics = Get-NativePopupMenus | ConvertTo-Json -Depth 8
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, [UIntPtr]::Zero)
+    [void][CCChanWin32Probe]::SetCursorPos(4, 4)
+    Start-Sleep -Milliseconds 80
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 40
+    [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
   }
 
-  $menuItem = Find-TrayMenuItemByNamePart -NamePart $menuItemName
-  if ($menuItem) {
-    Click-AutomationElement -Element $menuItem -Button "Left"
-    Start-Sleep -Milliseconds 500
-    return "uia-menu-item"
+  throw "Could not locate tray menu item '$menuItemName' through Win32 menu APIs or UI Automation after retries. Diagnostics: $lastDiagnostics"
+}
+
+function Set-CCChanTrayMenuVisibleState {
+  param(
+    [int]$ProcessId,
+    [string]$ConfigPath,
+    [string]$Tooltip,
+    [bool]$Visible,
+    [int]$MaxAttempts = 3
+  )
+
+  $methods = New-Object System.Collections.Generic.List[string]
+  $lastProbe = $null
+  $lastConfigVisible = $null
+
+  $currentProbe = Get-MascotWindow -ProcessId $ProcessId
+  $currentConfigVisible = Read-CCChanConfigVisible -Path $ConfigPath
+  if ((([bool]$currentProbe.mascot) -eq $Visible) -and $currentConfigVisible -eq $Visible) {
+    return [pscustomobject]@{
+      ok = $true
+      methods = @("already-target-state")
+      attempts = 0
+      probe = $currentProbe
+      configVisible = $currentConfigVisible
+    }
   }
 
-  $nativeDiagnostics = Get-NativePopupMenus | ConvertTo-Json -Depth 8
-  throw "Could not locate tray menu item '$menuItemName' through Win32 menu APIs or UI Automation. Native popup diagnostics: $nativeDiagnostics"
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $method = Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
+    $methods.Add($method) | Out-Null
+
+    $lastProbe = Wait-CCChanMascotState -ProcessId $ProcessId -Visible $Visible -TimeoutMs 5000
+    $lastConfigVisible = Read-CCChanConfigVisible -Path $ConfigPath
+    $windowMatches = ([bool]$lastProbe.mascot) -eq $Visible
+    $configMatches = $lastConfigVisible -eq $Visible
+    if ($windowMatches -and $configMatches) {
+      return [pscustomobject]@{
+        ok = $true
+        methods = $methods.ToArray()
+        attempts = $attempt
+        probe = $lastProbe
+        configVisible = $lastConfigVisible
+      }
+    }
+
+    Start-Sleep -Milliseconds 350
+  }
+
+  return [pscustomobject]@{
+    ok = $false
+    methods = $methods.ToArray()
+    attempts = $MaxAttempts
+    probe = $lastProbe
+    configVisible = $lastConfigVisible
+  }
 }
 
 function Test-CCChanTrayToggle {
@@ -781,35 +879,60 @@ function Test-CCChanTrayToggle {
   )
 
   if (-not $InitialMascot) {
-    throw "Cannot verify tray toggle without a visible mascot window."
+    $prepareResult = Set-CCChanTrayMenuVisibleState `
+      -ProcessId $ProcessId `
+      -ConfigPath $ConfigPath `
+      -Tooltip $Tooltip `
+      -Visible $true
+
+    if (-not $prepareResult.ok) {
+      throw "Cannot verify tray toggle because the mascot window is hidden and could not be restored through the tray menu."
+    }
+
+    $InitialMascot = $prepareResult.probe.mascot
+  } else {
+    $prepareResult = [pscustomobject]@{
+      ok = $true
+      methods = @("already-visible")
+      attempts = 0
+    }
   }
 
   $originalCursor = New-Object POINT
   [void][CCChanWin32Probe]::GetCursorPos([ref]$originalCursor)
 
   try {
-    $hideMethod = Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
-    $afterHideProbe = Wait-CCChanMascotState -ProcessId $ProcessId -Visible $false
-    $configAfterHide = Read-CCChanConfigVisible -Path $ConfigPath
-    $hideOk = [bool]((-not $afterHideProbe.mascot) -and $configAfterHide -eq $false)
+    $hideResult = Set-CCChanTrayMenuVisibleState `
+      -ProcessId $ProcessId `
+      -ConfigPath $ConfigPath `
+      -Tooltip $Tooltip `
+      -Visible $false
 
-    $showMethod = Invoke-CCChanTrayMenuToggle -Tooltip $Tooltip
-    $afterShowProbe = Wait-CCChanMascotState -ProcessId $ProcessId -Visible $true
-    $configAfterShow = Read-CCChanConfigVisible -Path $ConfigPath
-    $showOk = [bool]($afterShowProbe.mascot -and $configAfterShow -eq $true)
+    $showResult = Set-CCChanTrayMenuVisibleState `
+      -ProcessId $ProcessId `
+      -ConfigPath $ConfigPath `
+      -Tooltip $Tooltip `
+      -Visible $true
+
+    $hideMethod = ($hideResult.methods -join ",")
+    $showMethod = ($showResult.methods -join ",")
 
     return [pscustomobject]@{
       attempted = $true
       tooltip = $Tooltip
-      hideOk = $hideOk
-      showOk = $showOk
+      hideOk = $hideResult.ok
+      showOk = $showResult.ok
       hideMethod = $hideMethod
       showMethod = $showMethod
+      hideAttempts = $hideResult.attempts
+      showAttempts = $showResult.attempts
+      prepareMethod = ($prepareResult.methods -join ",")
+      prepareAttempts = $prepareResult.attempts
       before = $InitialMascot
-      afterHide = $afterHideProbe.mascot
-      afterShow = $afterShowProbe.mascot
-      configAfterHide = $configAfterHide
-      configAfterShow = $configAfterShow
+      afterHide = $hideResult.probe.mascot
+      afterShow = $showResult.probe.mascot
+      configAfterHide = $hideResult.configVisible
+      configAfterShow = $showResult.configVisible
     }
   } finally {
     [CCChanWin32Probe]::mouse_event([CCChanWin32Probe]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
