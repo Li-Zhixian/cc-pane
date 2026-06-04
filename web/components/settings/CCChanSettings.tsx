@@ -122,6 +122,20 @@ function isReadonlyInstallablePet(pet: PetMeta): pet is ReadonlyInstallablePet {
   return pet.source === "custom" || pet.source === "codexHome";
 }
 
+function getPetSourceLabel(source: PetMeta["source"]): string {
+  switch (source) {
+    case "builtin":
+      return "内置";
+    case "user":
+      return "已安装";
+    case "custom":
+    case "codexHome":
+      return "本地目录";
+    default:
+      return "本地";
+  }
+}
+
 export default function CCChanSettings({ value, onChange }: CCChanSettingsProps) {
   const pets = useCCChanStore((state) => state.pets);
   const load = useCCChanStore((state) => state.load);
@@ -270,17 +284,17 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "选择额外 cc酱宠物目录",
+      title: "选择 cc酱本地来源",
     });
     if (typeof selected !== "string") return;
     const nextDir = selected.trim();
     if (!nextDir) return;
     if (value.customPetDirs.some((dir) => dir.trim() === nextDir)) {
-      toast.success("该宠物目录已存在");
+      toast.success("该本地来源已存在");
       return;
     }
     update("customPetDirs", [...value.customPetDirs, nextDir]);
-    toast.success("已添加额外宠物目录，保存后生效");
+    toast.success("已添加本地来源，保存后生效");
   }
 
   async function refreshCustomPetDirStatuses() {
@@ -288,16 +302,16 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     try {
       const statuses = await invoke<CustomPetDirStatus[]>("get_ccchan_custom_pet_dir_statuses");
       setCustomDirStatuses(statuses);
-      toast.success("额外宠物目录已检查");
+      toast.success("本地来源已检查");
     } catch (error) {
-      toast.error(`检查额外宠物目录失败: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`检查本地来源失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setCustomDirStatusLoading(false);
     }
   }
 
   async function installFromUrl() {
-    const url = window.prompt("粘贴 HTTPS 桌宠 zip URL、codex://pets/install 或 ccpanes://pets/install 链接");
+    const url = window.prompt("粘贴 HTTPS 桌宠 zip URL 或桌宠安装链接");
     if (!url) return;
     try {
       await previewAndInstallCCChanPetUrl(url, load);
@@ -596,11 +610,11 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       </div>
 
       <div className="flex flex-col gap-3 border-t pt-3" style={{ borderColor: "var(--app-border)" }}>
-        <Label>宠物扩展来源</Label>
+        <Label>宠物来源</Label>
         {[
           { key: "builtin", label: "内置宠物" },
-          { key: "user", label: "用户安装目录" },
-          { key: "codexHome", label: "Codex Home pets" },
+          { key: "user", label: "已安装宠物" },
+          { key: "codexHome", label: "默认本地目录" },
         ].map((item) => (
           <label key={item.key} className="flex items-center justify-between gap-3 text-[13px]" style={{ color: "var(--app-text-primary)" }}>
             <span>{item.label}</span>
@@ -624,7 +638,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => void installFromUrl()}>
             <Download size={14} />
-            URL 安装
+            链接安装
           </Button>
           <Button type="button" size="sm" variant="ghost" onClick={() => void refreshPets()}>
             刷新列表
@@ -641,25 +655,25 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
         </div>
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
-            <Label>额外宠物目录</Label>
+            <Label>额外本地来源</Label>
             <div className="flex items-center gap-2">
               <Button type="button" size="sm" variant="ghost" onClick={() => void refreshCustomPetDirStatuses()} disabled={customDirStatusLoading}>
-                {customDirStatusLoading ? "检查中..." : "检查目录"}
+                {customDirStatusLoading ? "检查中..." : "检查来源"}
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => void addCustomPetDir()}>
-                添加目录
+                添加来源
               </Button>
             </div>
           </div>
           <textarea
             value={value.customPetDirs.join("\n")}
-            placeholder={"每行一个目录，例如：\n/mnt/d/my-pets\n\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\.codex\\pets"}
+            placeholder={"每行一个本地来源，例如：\n/mnt/d/my-pets\n\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\pets"}
             className="min-h-[78px] resize-y rounded-md px-2 py-2 font-mono text-[12px] outline-none"
             style={selectStyle}
             onChange={(event) => update("customPetDirs", event.target.value.split(/\r?\n/))}
           />
           <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-            用于手动接入 Codex Home、WSL UNC 或其他本地宠物目录；这些目录只读，不会被“删除用户宠物”影响。
+            用于手动接入本机、WSL UNC 或其他你信任的本地来源；这些来源只读，不会被“删除用户宠物”影响。
           </p>
           {customDirStatuses.length > 0 && (
             <div className="flex max-h-32 flex-col gap-1 overflow-y-auto rounded-md border p-2 text-[11px]" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
@@ -693,13 +707,13 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
         {readonlyInstallablePets.length > 0 && (
           <div className="flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border p-2" style={{ borderColor: "var(--app-border)", background: "var(--app-bg)" }}>
             <div className="text-[12px] font-medium" style={{ color: "var(--app-text-primary)" }}>
-              可安装的外部宠物
+              可安装的本地宠物
             </div>
             {readonlyInstallablePets.map((pet) => (
               <div key={`${pet.source}:${pet.id}`} className="flex items-center justify-between gap-3 rounded px-2 py-1 text-[12px]" style={{ color: "var(--app-text-primary)" }}>
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{pet.displayName}</span>
-                  <span className="block truncate" style={{ color: "var(--app-text-tertiary)" }}>{pet.id} · {pet.source}</span>
+                  <span className="block truncate" style={{ color: "var(--app-text-tertiary)" }}>{pet.id} · {getPetSourceLabel(pet.source)}</span>
                 </span>
                 <Button type="button" size="sm" variant="ghost" onClick={() => void installReadonlyPet(pet.id, pet.source)}>
                   安装到用户目录
@@ -709,7 +723,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
           </div>
         )}
         <p className="m-0 text-[11px]" style={{ color: "var(--app-text-tertiary)" }}>
-          支持 Codex pet 标准结构：pet.json + spritesheet.webp/png/gif；粘贴安装支持 HTTPS zip、官方 codex://pets/install 和 CC-Panes 自有 ccpanes://pets/install 链接。
+          支持 pet.json + spritesheet.webp/png/gif 结构；链接安装支持 HTTPS zip 和桌宠安装链接，安装前会先预览并确认。
         </p>
       </div>
 

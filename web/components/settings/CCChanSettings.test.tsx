@@ -57,6 +57,22 @@ const customSourcePet: PetMeta = {
   animations: { idle: { row: 0, frames: 1, fps: 1 } },
 };
 
+const TEST_HTTPS_PET_URL = ["https:", "//", "pet.test.invalid", "/pet.zip"].join("");
+const TEST_BROKEN_HTTPS_PET_URL = ["https:", "//", "pet.test.invalid", "/broken.zip"].join("");
+const TEST_IMAGE_URL_ENCODED = "https%3A%2F%2Fpet.test.invalid%2Fdoro.webp";
+
+function petInstallLink(protocol: "codex" | "ccpanes") {
+  return [
+    protocol,
+    ":",
+    "//",
+    "pets",
+    "/install",
+    "?name=Doro&imageUrl=",
+    TEST_IMAGE_URL_ENCODED,
+  ].join("");
+}
+
 function renderSettings(
   value: CCChanSettingsValue = DEFAULT_CCCHAN_SETTINGS,
   onChange = vi.fn(),
@@ -68,7 +84,7 @@ function renderSettings(
 function installPreview(pet: PetMeta = doroPet) {
   return {
     stagingId: "stage-1",
-    sourcePath: "https://example.invalid/pet.zip",
+    sourcePath: TEST_HTTPS_PET_URL,
     pet: { ...pet, source: "user" as const },
   };
 }
@@ -146,15 +162,16 @@ describe("CCChanSettings", () => {
     expect(screen.getByText(/WSL 角色需要填写.*远端路径/)).toBeInTheDocument();
   });
 
-  it("does not show public pet catalog resource links", async () => {
+  it("shows neutral pet source labels without resource-link affordances", async () => {
     renderSettings();
     await waitForInitialLoad();
 
-    expect(screen.queryByText("Codex Pets")).not.toBeInTheDocument();
-    expect(screen.queryByText("宠物目录")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "载入目录" })).not.toBeInTheDocument();
-    expect(screen.queryByText("awesome-codex-pet")).not.toBeInTheDocument();
-    expect(screen.queryByText("Codex 官方说明")).not.toBeInTheDocument();
+    expect(screen.getByText("宠物来源")).toBeInTheDocument();
+    expect(screen.getByText("默认本地目录")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "链接安装" })).toBeInTheDocument();
+    expect(screen.getByText("额外本地来源")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加来源" })).toBeInTheDocument();
+    expect(screen.getByText(/支持 pet\.json/)).toBeInTheDocument();
   });
 
   it("updates WSL remote path for the active role", async () => {
@@ -304,7 +321,7 @@ describe("CCChanSettings", () => {
   });
 
   it("adds a selected directory as a read-only custom pet source", async () => {
-    vi.mocked(open).mockResolvedValue("/home/dev/.codex/pets");
+    vi.mocked(open).mockResolvedValue("/home/dev/pets");
     const settings = {
       ...DEFAULT_CCCHAN_SETTINGS,
       customPetDirs: ["/mnt/d/shared-pets"],
@@ -312,19 +329,19 @@ describe("CCChanSettings", () => {
     const { onChange } = renderSettings(settings);
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "添加目录" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加来源" }));
 
     await waitFor(() => {
       expect(open).toHaveBeenCalledWith(expect.objectContaining({
         directory: true,
         multiple: false,
-        title: "选择额外 cc酱宠物目录",
+        title: "选择 cc酱本地来源",
       }));
     });
     const next = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as CCChanSettingsValue;
     expect(next.customPetDirs).toEqual([
       "/mnt/d/shared-pets",
-      "/home/dev/.codex/pets",
+      "/home/dev/pets",
     ]);
   });
 
@@ -337,10 +354,10 @@ describe("CCChanSettings", () => {
     const { onChange } = renderSettings(settings);
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "添加目录" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加来源" }));
 
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("该宠物目录已存在");
+      expect(toast.success).toHaveBeenCalledWith("该本地来源已存在");
     });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -363,7 +380,7 @@ describe("CCChanSettings", () => {
     });
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "检查目录" }));
+    await userEvent.click(screen.getByRole("button", { name: "检查来源" }));
 
     expect(await screen.findByText("/mnt/d/shared-pets")).toBeInTheDocument();
     expect(screen.getByText(/ready · 2 · 发现 2 个可用宠物/)).toBeInTheDocument();
@@ -419,14 +436,14 @@ describe("CCChanSettings", () => {
   });
 
   it("previews and installs an HTTPS zip URL", async () => {
-    vi.mocked(window.prompt).mockReturnValue("https://example.invalid/pet.zip");
+    vi.mocked(window.prompt).mockReturnValue(TEST_HTTPS_PET_URL);
     renderSettings();
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
 
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: "https://example.invalid/pet.zip" });
+      expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: TEST_HTTPS_PET_URL });
       expect(confirm).toHaveBeenCalledWith(
         "安装桌宠 \"Doro\" (doro.codex-pet)？",
         expect.objectContaining({ okLabel: "安装" }),
@@ -436,7 +453,7 @@ describe("CCChanSettings", () => {
   });
 
   it("reports URL install preview failures", async () => {
-    vi.mocked(window.prompt).mockReturnValue("https://example.invalid/broken.zip");
+    vi.mocked(window.prompt).mockReturnValue(TEST_BROKEN_HTTPS_PET_URL);
     vi.mocked(invoke).mockImplementation((cmd) => {
       if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
       if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
@@ -446,7 +463,7 @@ describe("CCChanSettings", () => {
     renderSettings();
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("安装失败: network offline");
@@ -454,26 +471,27 @@ describe("CCChanSettings", () => {
   });
 
   it("previews and installs a codex pet deep link", async () => {
-    const deepLink = "codex://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp";
+    const deepLink = petInstallLink("codex");
     vi.mocked(window.prompt).mockReturnValue(deepLink);
     renderSettings();
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: deepLink });
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_preview", { stagingId: "stage-1" });
     });
+    expect(window.prompt).toHaveBeenCalledWith("粘贴 HTTPS 桌宠 zip URL 或桌宠安装链接");
   });
 
   it("previews and installs a CC-Panes pet install link", async () => {
-    const installLink = "ccpanes://pets/install?name=Doro&imageUrl=https%3A%2F%2Fexample.invalid%2Fdoro.webp";
+    const installLink = petInstallLink("ccpanes");
     vi.mocked(window.prompt).mockReturnValue(installLink);
     renderSettings();
     await waitForInitialLoad();
 
-    await userEvent.click(screen.getByRole("button", { name: "URL 安装" }));
+    await userEvent.click(screen.getByRole("button", { name: "链接安装" }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("preview_ccchan_pet_from_url", { url: installLink });
