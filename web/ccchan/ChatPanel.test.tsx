@@ -532,6 +532,54 @@ describe("ChatPanel", () => {
     expect(HTMLElement.prototype.scrollTo).toHaveBeenCalled();
   });
 
+  it("sends user input and appends terminal output to the transcript", async () => {
+    const handlers: {
+      output?: (event: { payload: TerminalOutputPayload }) => void;
+    } = {};
+    vi.mocked(listen).mockImplementation((eventName, handler) => {
+      if (eventName === "terminal-output") {
+        handlers.output = handler as (event: { payload: TerminalOutputPayload }) => void;
+      }
+      return Promise.resolve(() => {});
+    });
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "send_to_ccchan") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+
+    render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        onSessionIdChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(handlers.output).toBeTruthy();
+    });
+    await userEvent.type(screen.getByPlaceholderText("输入消息..."), "hello ccchan");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("send_to_ccchan", {
+        sessionId: "active-session",
+        text: "hello ccchan",
+      });
+    });
+    expect(screen.getByText(/> hello ccchan/)).toBeInTheDocument();
+
+    act(() => {
+      handlers.output?.({
+        payload: { sessionId: "active-session", data: "assistant reply\n" },
+      });
+    });
+
+    expect(await screen.findByText(/assistant reply/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入消息...")).toHaveValue("");
+  });
+
   it("cleans up an output listener that resolves after unmount", async () => {
     const unlisten = vi.fn();
     const listenerReady = deferred<() => void>();
