@@ -123,6 +123,7 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - The ccchan window has topmost extended style bits (`WS_EX_TOPMOST`) and persisted `windowVisible`, `windowX`, and `windowY` updates in `C:\Users\ROG\.cc-panes-dev\config.toml`.
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - Triggering `ccpanes://pets/install/?name=DeepLinkProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` and a real `awesome-codex-pet` style link did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
+- With the dev app stopped and Vite still serving `localhost:14200`, triggering `ccpanes://pets/install/?name=ColdStartProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
 - A desktop screenshot captured during the run shows the ccchan settings panel open in the dev app and the mascot visible on the desktop; the screenshot is stored outside git under `_mod_memory/ccpanes-dev-screenshot.png`.
 
 Current WSL limitation:
@@ -135,7 +136,7 @@ Windows-host-required:
 
 - Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning.
 - Verify `ccpanes://` protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
-- Verify `ccpanes://` protocol cold-start URL handling before the main WebView has loaded. Second-instance forwarding has process-level evidence from the dev run above, but the install confirmation/download path still needs a network that can fetch the target HTTPS asset.
+- Verify `ccpanes://` install confirmation and download with a network that can fetch the target HTTPS asset. Cold-start process launch and second-instance forwarding have Windows dev-run evidence above.
 - Verify Claude Code and Codex chat launch for local Windows roles and explicit WSL roles, including the absolute WSL remote path error state, successful remote path startup, and hook files written to the mapped host project path.
 - Verify status updates for Claude and Codex through project hooks when supported, and through terminal/session fallback when hooks are degraded or unsupported.
 - Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, `ccpanes://pets/install` OS deep-link click, Codex Home/custom directories, and the Awesome Codex Pet catalog.
