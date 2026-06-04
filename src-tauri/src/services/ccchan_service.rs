@@ -7,6 +7,9 @@ use crate::models::{CliTool, LaunchProviderSelection, WslLaunchInfo};
 use crate::services::{SettingsService, TerminalService};
 use crate::utils::{AppError, AppPaths, AppResult};
 use cc_panes_core::events::SessionNotifier;
+use cc_panes_core::services::ccchan_window::{
+    clamp_ccchan_position_to_visible, LogicalMonitorRect,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -890,52 +893,18 @@ fn position_window(window: &WebviewWindow, settings: &CCChanSettings) -> AppResu
 /// hot-unplug / DPI change) AND on every drag-release (so a user who drags
 /// the mascot off-screen sees it snap back instead of vanishing).
 pub fn clamp_position_to_visible(window: &WebviewWindow, x: f64, y: f64) -> (f64, f64) {
-    const PET_SIZE: f64 = 120.0;
-    const SAFE_MARGIN: f64 = 8.0;
-    const HALF_OFF_TOLERANCE: f64 = 40.0;
-
     let Ok(monitors) = window.available_monitors() else {
         return (80.0, 80.0);
     };
-    if monitors.is_empty() {
-        return (80.0, 80.0);
-    }
-
-    let already_visible = monitors.iter().any(|m| {
-        let (lx, ly, lw, lh) = monitor_logical_rect(m);
-        x + HALF_OFF_TOLERANCE > lx
-            && x < lx + lw - HALF_OFF_TOLERANCE
-            && y + HALF_OFF_TOLERANCE > ly
-            && y < ly + lh - HALF_OFF_TOLERANCE
-    });
-    if already_visible {
-        return (x, y);
-    }
-
-    let mut best: Option<(f64, f64, f64)> = None;
-    for m in &monitors {
-        let (lx, ly, lw, lh) = monitor_logical_rect(m);
-        let cx = x.clamp(
-            lx + SAFE_MARGIN,
-            (lx + lw - PET_SIZE - SAFE_MARGIN).max(lx + SAFE_MARGIN),
-        );
-        let cy = y.clamp(
-            ly + SAFE_MARGIN,
-            (ly + lh - PET_SIZE - SAFE_MARGIN).max(ly + SAFE_MARGIN),
-        );
-        let dist = (cx - x).powi(2) + (cy - y).powi(2);
-        if best.is_none_or(|b| dist < b.0) {
-            best = Some((dist, cx, cy));
-        }
-    }
-    best.map(|(_, cx, cy)| (cx, cy)).unwrap_or((80.0, 80.0))
+    let rects: Vec<LogicalMonitorRect> = monitors.iter().map(monitor_logical_rect).collect();
+    clamp_ccchan_position_to_visible(&rects, x, y)
 }
 
-fn monitor_logical_rect(monitor: &tauri::Monitor) -> (f64, f64, f64, f64) {
+fn monitor_logical_rect(monitor: &tauri::Monitor) -> LogicalMonitorRect {
     let scale = monitor.scale_factor();
     let pos = monitor.position();
     let size = monitor.size();
-    (
+    LogicalMonitorRect::new(
         pos.x as f64 / scale,
         pos.y as f64 / scale,
         size.width as f64 / scale,
