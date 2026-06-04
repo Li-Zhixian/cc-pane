@@ -119,7 +119,7 @@ Windows-host-required validation still applies for desktop behavior: transparent
 Current-environment-verifiable:
 
 - TypeScript: `npx tsc --noEmit --pretty false`.
-- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts web/ccchan/ChatPanel.test.tsx web/ccchan/CCChanApp.test.tsx`.
+- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts web/ccchan/deepLink.test.ts web/ccchan/ChatPanel.test.tsx web/ccchan/CCChanApp.test.tsx`.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
 

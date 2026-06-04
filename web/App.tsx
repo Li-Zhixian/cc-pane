@@ -59,8 +59,7 @@ import { isTauriReady, waitForTauri } from "@/utils";
 import { playNotificationSound } from "@/utils/notificationSound";
 import { findPaneFocusTarget, readPaneFocusRects, type PaneFocusDirection } from "@/utils/paneFocus";
 import { registerGlobalApi } from "@/utils/globalApi";
-import { isCCPanesPetInstallLink, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
-import { useCCChanStore } from "@/stores/useCCChanStore";
+import { handleCCPanesDeepLinks } from "@/ccchan/deepLink";
 import i18n from "@/i18n";
 import type { PaneNode, Panel as PanelType, OpenTerminalOptions, SavedSession, TerminalPaneLeaf, TerminalPaneNode } from "@/types";
 
@@ -92,20 +91,6 @@ function resolveRuntimeKind(opts: Pick<OpenTerminalOptions, "ssh" | "wsl">): str
   if (opts.ssh) return "ssh";
   if (opts.wsl) return "wsl";
   return "local";
-}
-
-async function handleCCPanesDeepLinks(urls: string[]) {
-  const petInstallUrl = urls.find(isCCPanesPetInstallLink);
-  if (!petInstallUrl) return;
-  const window = getCurrentWindow();
-  await window.show().catch(() => {});
-  await window.setFocus().catch(() => {});
-  useDialogStore.getState().openSettings("ccchan");
-  try {
-    await previewAndInstallCCChanPetUrl(petInstallUrl, useCCChanStore.getState().load);
-  } catch (error) {
-    toast.error(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
 function focusSessionTab(sessionId: string): boolean {
