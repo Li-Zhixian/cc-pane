@@ -375,6 +375,9 @@ impl CCChanService {
         } else {
             find_pet_root(&source)?
         };
+        if !source.is_file() {
+            validate_pet_dir_copy_limits(&pet_root)?;
+        }
         let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
         Ok(PetInstallPreview {
             staging_id,
@@ -1679,6 +1682,53 @@ struct PetCopyLimits {
     bytes: usize,
 }
 
+fn validate_pet_dir_copy_limits(source: &Path) -> AppResult<()> {
+    let mut limits = PetCopyLimits::default();
+    validate_pet_dir_copy_limits_inner(source, &mut limits)
+}
+
+fn validate_pet_dir_copy_limits_inner(source: &Path, limits: &mut PetCopyLimits) -> AppResult<()> {
+    for entry in std::fs::read_dir(source).map_err(|error| {
+        AppError::from(format!(
+            "Failed to read pet directory {}: {}",
+            source.display(),
+            error
+        ))
+    })? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let source_path = entry.path();
+        if file_type.is_symlink() {
+            return Err(AppError::from(format!(
+                "ccchan pet folders cannot contain symlinks: {}",
+                source_path.display()
+            )));
+        }
+        if file_type.is_dir() {
+            validate_pet_dir_copy_limits_inner(&source_path, limits)?;
+        } else if file_type.is_file() {
+            limits.files = limits.files.saturating_add(1);
+            if limits.files > MAX_PET_FILES {
+                return Err(AppError::from(format!(
+                    "Pet folder contains too many files: {}",
+                    limits.files
+                )));
+            }
+            let size = entry.metadata()?.len() as usize;
+            limits.bytes = limits.bytes.saturating_add(size);
+            if limits.bytes > MAX_PET_PACKAGE_BYTES {
+                return Err(AppError::from("Pet folder total size is too large"));
+            }
+        } else {
+            return Err(AppError::from(format!(
+                "ccchan pet folders can only contain files and directories: {}",
+                source_path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn copy_pet_dir_limited(source: &Path, target: &Path, limits: &mut PetCopyLimits) -> AppResult<()> {
     std::fs::create_dir_all(target)?;
     for entry in std::fs::read_dir(source).map_err(|error| {
@@ -2226,6 +2276,29 @@ mod tests {
             .map(|entries| entries.count())
             .unwrap_or(0);
         assert_eq!(staging_entries, 0);
+    }
+
+    #[test]
+    fn preview_pet_from_path_rejects_folder_before_confirm_when_copy_limits_fail() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let pet_dir = temp.path().join("oversized");
+        write_minimal_pet(&pet_dir, "oversized");
+        for index in 0..=MAX_PET_FILES {
+            std::fs::write(pet_dir.join(format!("extra-{index}.txt")), b"x")
+                .expect("write extra file");
+        }
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let error = service
+            .preview_pet_from_path(pet_dir.to_string_lossy().to_string())
+            .expect_err("folder limits should fail at preview time");
+
+        assert!(error.to_string().contains("too many files"));
+        assert!(!data_dir.join("ccchan").join("pet-staging").exists());
     }
 
     #[test]

@@ -106,6 +106,23 @@ function resolveWslTargetPath(path?: string | null): string | null {
   return toWslPath(trimmed);
 }
 
+function getActiveRoleWslWarning(role: CCChanRolePreset, currentWslTarget: { label: string; path: string } | null): string | null {
+  if (role.runtimeKind !== "wsl") return null;
+  const remotePath = role.wslRemotePath?.trim() ?? "";
+  if (!remotePath) {
+    return [
+      "WSL 角色需要填写以 / 开头的绝对远端路径，否则 cc酱 chat 启动时会被后端拒绝。",
+      currentWslTarget
+        ? `可直接使用“${currentWslTarget.label}”的 ${currentWslTarget.path}。`
+        : "请选择一个可转换为 WSL 路径的项目或配置工作空间 WSL 路径。",
+    ].join(" ");
+  }
+  if (!remotePath.startsWith("/")) {
+    return `WSL 远端路径必须以 / 开头，不能使用 Windows 路径或 UNC 路径：${remotePath}`;
+  }
+  return null;
+}
+
 type ReadonlyInstallablePet = PetMeta & { source: "custom" | "codexHome" };
 
 function isReadonlyInstallablePet(pet: PetMeta): pet is ReadonlyInstallablePet {
@@ -163,6 +180,7 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   }, [awesomePets, awesomeQuery]);
   const visibleAwesomePets = filteredAwesomePets.slice(0, awesomeVisibleCount);
   const readonlyInstallablePets = petOptions.filter(isReadonlyInstallablePet);
+  const activeRoleWslWarning = activeRole ? getActiveRoleWslWarning(activeRole, currentWslTarget) : null;
 
   useEffect(() => {
     void load();
@@ -561,10 +579,9 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
                   />
                 </div>
               </div>
-              {!activeRole.wslRemotePath?.trim() && (
+              {activeRoleWslWarning && (
                 <p className="m-0 rounded-md border px-2 py-1 text-[11px]" style={{ borderColor: "var(--app-warning-border, #b7791f)", color: "var(--app-warning-text, #f6ad55)" }}>
-                  WSL 角色需要填写以 / 开头的绝对远端路径，否则 cc酱 chat 启动时会被后端拒绝。
-                  {currentWslTarget ? ` 可直接使用“${currentWslTarget.label}”的 ${currentWslTarget.path}。` : " 请选择一个可转换为 WSL 路径的项目或配置工作空间 WSL 路径。"}
+                  {activeRoleWslWarning}
                 </p>
               )}
             </div>

@@ -86,7 +86,7 @@ The ccchan settings panel supports:
 - Custom directory source management: users can either type one read-only directory per line or use a directory picker to append another pet source, so local Codex Home mirrors, WSL UNC folders, and manually curated community pet folders can be added without hand-copying paths. Custom and Codex Home pets can also be copied into the user install directory from settings.
 - Resource links: opens the Codex Pets community catalog, `awesome-codex-pet`, and the official Codex pets settings guide.
 
-URL installs require `https://`, keep redirects on `https://`, cap redirect chains at 5 hops, time out remote downloads after 30 seconds, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs use the same file-count and total-size limits and reject symlinks.
+URL installs require `https://`, keep redirects on `https://`, cap redirect chains at 5 hops, time out remote downloads after 30 seconds, stream remote downloads with a 30 MB cap, cap zip file count at 128, and reject zip entries that escape the staging directory. Folder installs validate the same file-count, total-size, and symlink limits before showing the confirmation dialog and again during the final copy.
 
 Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.com/legeling/awesome-codex-pet/main`, validate catalog slugs and relative spritesheet paths, and use the same staging/install flow as zip and URL installs.
 

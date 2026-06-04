@@ -203,6 +203,27 @@ describe("CCChanSettings", () => {
     expect(next.roles.find((role) => role.id === wslRole.id)?.wslRemotePath).toBe("/mnt/d/my-project/cc-pane");
   });
 
+  it("warns when the active WSL role uses a Windows path", async () => {
+    const wslRole = {
+      ...DEFAULT_CCCHAN_SETTINGS.roles[0],
+      id: "codex-wsl",
+      name: "Codex WSL 助手",
+      aiEngine: "codex" as const,
+      runtimeKind: "wsl" as const,
+      wslRemotePath: "D:\\my-project\\cc-pane",
+    };
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: wslRole.id,
+      roles: [...DEFAULT_CCCHAN_SETTINGS.roles, wslRole],
+    };
+    renderSettings(settings);
+    await waitForInitialLoad();
+
+    expect(screen.getByText(/WSL 远端路径必须以 \/ 开头/)).toBeInTheDocument();
+    expect(screen.getByText(/D:\\my-project\\cc-pane/)).toBeInTheDocument();
+  });
+
   it("fills the active WSL role path from the selected workspace project", async () => {
     const wslRole = {
       ...DEFAULT_CCCHAN_SETTINGS.roles[0],
