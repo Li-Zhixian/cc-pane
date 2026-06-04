@@ -381,9 +381,15 @@ fn is_wsl_home_path(path: &str) -> bool {
 pub(super) fn windows_path_to_wsl(path: &std::path::Path) -> Option<String> {
     let normalized = path.to_string_lossy().replace('\\', "/");
     let normalized = normalized.strip_prefix("//?/").unwrap_or(&normalized);
+    if normalized.starts_with("/mnt/") {
+        return Some(normalized.to_string());
+    }
     let bytes = normalized.as_bytes();
     if normalized.len() < 3 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
         return None;
+    }
+    if let Some(wsl_path) = normalized[2..].strip_prefix("/mnt/") {
+        return Some(format!("/mnt/{wsl_path}"));
     }
 
     let mut suffix = normalized[2..].trim_start_matches('/').to_string();
@@ -1194,6 +1200,37 @@ mod tests {
         assert!(commands
             .iter()
             .any(|line: &String| line.contains("cp \"$CCPANES_WSL_CLAUDE_SRC/launch-task.md\"")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_to_wsl_accepts_already_translated_mnt_paths() {
+        assert_eq!(
+            super::windows_path_to_wsl(Path::new(
+                "/mnt/c/Users/test/.cc-panes/wsl-claude-mcp.json"
+            )),
+            Some("/mnt/c/Users/test/.cc-panes/wsl-claude-mcp.json".to_string())
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_to_wsl_accepts_drive_prefixed_translated_mnt_paths() {
+        assert_eq!(
+            super::windows_path_to_wsl(Path::new(
+                r"D:\mnt\c\Users\test\.cc-panes\wsl-claude-mcp.json"
+            )),
+            Some("/mnt/c/Users/test/.cc-panes/wsl-claude-mcp.json".to_string())
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_to_wsl_converts_drive_paths() {
+        assert_eq!(
+            super::windows_path_to_wsl(Path::new(r"C:\Users\test\.cc-panes\wsl-claude-mcp.json")),
+            Some("/mnt/c/Users/test/.cc-panes/wsl-claude-mcp.json".to_string())
+        );
     }
 
     #[test]
