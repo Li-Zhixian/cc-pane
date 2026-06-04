@@ -96,6 +96,7 @@ The ccchan settings panel supports:
 Folder and zip installs validate file-count, total-size, safe paths, and symlink limits before showing the confirmation dialog and again during the final copy.
 
 Zip previews create a staging directory under `<data-dir>/ccchan/pet-staging`; successful installs, failed install attempts, and cancelled confirmation dialogs remove that staging directory instead of leaving abandoned packages behind.
+Preview failures after staging creation also clean their staging directory. This covers invalid zip payloads, missing pet assets after extraction, and generated single-image pet previews that fail manifest validation before the user sees a confirmation dialog.
 
 CC-Panes keeps compatibility with local pet-home folders and discovers them through the default local directory source, but the settings UI does not show third-party resource catalogs, remote install links, or supported-link syntax.
 
@@ -114,7 +115,7 @@ ccchan combines two status paths:
 - `focusedWindow` mode also filters the visible session dots, so the desktop pet's status badge and aggregate animation follow the same focused-session scope.
 - `soundEnabled` controls the ccchan window's Web Audio cue for these lifecycle events; toast bubbles still appear when sound is disabled.
 
-Codex hooks are an enhancement path, not the only state source. Codex supports lifecycle hooks and `commandWindows`; CC-Panes enables the canonical `[features].hooks = true` flag while retaining the deprecated `codex_hooks` alias for compatibility. Project-local hook behavior still depends on Codex trust/config and host/runtime details, so CC-Panes treats terminal status snapshots and backend session notifications as the cross-platform baseline for Claude Code, Codex, Windows host launches, and WSL launches.
+Codex hooks are an enhancement path, not the only state source. The CC-Panes Codex adapter enables the canonical `[features].hooks = true` flag while retaining the deprecated `codex_hooks` alias for compatibility, then writes the currently supported `SessionStart` and `PostToolUse` command hook entries. Project-local hook behavior still depends on Codex trust/config and host/runtime details, so CC-Panes treats terminal status snapshots and backend session notifications as the cross-platform baseline for Claude Code, Codex, Windows host launches, and WSL launches.
 
 Windows-host-required validation still applies for desktop behavior: transparent WebView window, always-on-top behavior, tray interaction, WebView2, and Win32/WSL PTY details cannot be fully verified from WSL alone.
 
@@ -127,6 +128,7 @@ Current-environment-verifiable:
 - Focused Windows frontend reruns: `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/ChatPanel.test.tsx web/ccchan/installPet.test.ts web/ccchan/deepLink.test.ts --reporter=dot"` verifies WSL role restart behavior, hidden chat lifecycle handling, and protocol compatibility without exposing remote install affordances in settings.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
 - Runtime status regression checks: `cargo test -p cc-panes-core session_state_machine -- --nocapture` verifies hook transitions, stale tool metadata cleanup, and listener behavior; `cargo test -p cc-panes-core status_info_merges_state_machine_tool_snapshot -- --nocapture` verifies terminal status payloads merge current state-machine tool metadata for ccchan/frontend consumption.
+- ccchan pet install service checks in `src-tauri/src/services/ccchan_service.rs` cover folder install without staging, direct zip install with staging cleanup, zip preview plus install cleanup, zip preview cancellation cleanup, preview failure cleanup after staging creation, failed preview-install cleanup, unsafe staging id rejection, custom local-source install from both parent folders and direct pet folders, default local pet-home install, missing source rejection, non-read-only source rejection, zip slip rejection, copy limits, symlink rejection on Unix, and spritesheet path traversal rejection. In this WSL environment these `cc-panes` crate tests are blocked by missing GTK/WebKit pkg-config dependencies, but Windows `cargo check -p cc-panes` verifies the service code compiles.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
 
 Windows-host compile/build checks run from WSL through PowerShell:
@@ -161,15 +163,17 @@ Current WSL limitation:
 - `cargo check -p cc-panes` and `cargo test -p cc-panes ccchan_ -- --nocapture` require Linux WebKit/GTK pkg-config dependencies (`glib-2.0`, `gobject-2.0`, `gio-2.0`) in this WSL environment.
 - Windows `cargo test -p cc-panes ccchan_ -- --nocapture` currently compiles the test binary but the binary exits before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; this still needs a Windows host runtime environment check separate from compile validation. A rerun with `CARGO_TARGET_DIR=D:\my-project\cc-pane-target-ccchan-test` avoided the running dev exe lock and still reproduced `STATUS_ENTRYPOINT_NOT_FOUND` after compiling `cc_panes_lib-2777f230912660e4.exe`.
 - The external-resource catalog path was removed because it exposed nonessential remote references from the app surface.
+- Windows folder-install reparse point and symlink behavior remains Windows-host-required. The folder copy path rejects symlinks through `file_type().is_symlink()`, and Unix symlink rejection is tested, but Windows junction/symlink behavior must be verified on the Windows host because the current `cc-panes` Rust test binary does not run there.
 
 Windows-host-required:
 
 - Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning. Current automated evidence verifies a visible `120x120` topmost dev ccchan window and persisted visibility/position on a single-monitor Windows host; physical multi-monitor positioning still requires a host with a second display.
 - Verify desktop protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
 - Verify local folder, zip, and trusted local-source install confirmations on Windows.
+- The backend install matrix is automated in `ccchan_service` tests and the settings UI invokes the expected folder, zip, and local-source commands in focused Vitest coverage. Remaining Windows-host work is the native dialog/manual confirmation flow, not core install semantics.
 - Verify an interactive Claude WSL chat transcript from the ccchan UI. Launch plumbing for Windows local Claude/Codex and WSL Claude/Codex has Windows dev-run evidence above; WSL Claude still needs a manual interactive chat check because the automated probe exited quickly after PTY attach.
 - Verify status updates for Claude and Codex through project hooks when supported, and through terminal/session fallback when hooks are degraded or unsupported.
-- Install pets from folder, zip, and trusted local sources. Protocol compatibility remains a separate Windows-host check and must not reintroduce remote install affordances in settings.
+- Manually install pets from folder, zip, and trusted local sources on Windows to verify native dialogs and user-facing flow. Protocol compatibility remains a separate Windows-host check and must not reintroduce remote install affordances in settings.
 
 Commit convention:
 

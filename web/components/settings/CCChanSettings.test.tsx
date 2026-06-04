@@ -110,9 +110,6 @@ describe("CCChanSettings", () => {
     vi.mocked(invoke).mockImplementation((cmd, args) => {
       if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
       if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
-      if (cmd === "preview_ccchan_pet_from_url") {
-        return Promise.resolve(installPreview());
-      }
       if (cmd === "preview_ccchan_pet_from_path") {
         return Promise.resolve(installPreview());
       }
@@ -188,6 +185,7 @@ describe("CCChanSettings", () => {
     expect(screen.getByRole("button", { name: "添加来源" })).toBeInTheDocument();
     expect(screen.getByText(/文件夹和 zip 安装前会先预览并确认/)).toBeInTheDocument();
     expect(screen.queryByText(/HTTPS|桌宠安装链接/)).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("preview_ccchan_pet_from_url", expect.anything());
   });
 
   it("updates WSL remote path for the active role", async () => {
@@ -429,6 +427,38 @@ describe("CCChanSettings", () => {
         expect.objectContaining({ okLabel: "安装" }),
       );
       expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_source", { petId: "external-pet", source: "custom" });
+    });
+  });
+
+  it("installs a default local directory pet into the user pet directory", async () => {
+    useCCChanStore.setState({
+      settings: DEFAULT_CCCHAN_SETTINGS,
+      pets: [doroPet, codexHomePet],
+      loaded: true,
+    });
+    vi.mocked(invoke).mockImplementation((cmd, args) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(DEFAULT_CCCHAN_SETTINGS);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet, codexHomePet]);
+      if (cmd === "install_ccchan_pet_from_source") {
+        expect(args).toEqual({ petId: codexHomePet.id, source: "codexHome" });
+        return Promise.resolve(undefined);
+      }
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    renderSettings();
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "安装到用户目录" }));
+
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(
+        "把 \"Local Home Pet\" (local-home-pet) 安装到用户宠物目录？",
+        expect.objectContaining({ okLabel: "安装" }),
+      );
+      expect(invoke).toHaveBeenCalledWith("install_ccchan_pet_from_source", {
+        petId: "local-home-pet",
+        source: "codexHome",
+      });
     });
   });
 

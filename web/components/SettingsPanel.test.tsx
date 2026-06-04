@@ -139,4 +139,26 @@ describe("SettingsPanel ccchan validation", () => {
       wslRemotePath: "/mnt/d/my-project/cc-pane",
     }));
   });
+
+  it("saves the latest loaded ccchan visibility when the settings draft is stale", async () => {
+    const hiddenCCChanSettings = { ...DEFAULT_CCCHAN_SETTINGS, windowVisible: false };
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === "get_ccchan_settings") return Promise.resolve(hiddenCCChanSettings);
+      if (cmd === "get_ccchan_pets") return Promise.resolve([doroPet]);
+      return Promise.reject(new Error(`Unhandled invoke command: ${cmd}`));
+    });
+    useCCChanStore.setState({
+      settings: hiddenCCChanSettings,
+      loaded: true,
+    });
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(settingsService.updateSettings).toHaveBeenCalledTimes(1);
+    });
+    const saved = vi.mocked(settingsService.updateSettings).mock.calls[0][0];
+    expect(saved.ccchan?.windowVisible).toBe(false);
+  });
 });

@@ -241,16 +241,21 @@ impl CCChanService {
 
         let staging_id = uuid::Uuid::new_v4().to_string();
         let staging_dir = self.pet_staging_dir().join(&staging_id);
-        std::fs::create_dir_all(&staging_dir)?;
-        extract_pet_zip(&download.bytes, &staging_dir)?;
-
-        let pet_root = find_pet_root(&staging_dir)?;
-        let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
-        Ok(PetInstallPreview {
-            staging_id,
-            pet,
-            source_path: parsed.to_string(),
-        })
+        let result = (|| {
+            std::fs::create_dir_all(&staging_dir)?;
+            extract_pet_zip(&download.bytes, &staging_dir)?;
+            let pet_root = find_pet_root(&staging_dir)?;
+            let pet = load_pet_from_dir(&pet_root, PetSource::User)?;
+            Ok(PetInstallPreview {
+                staging_id,
+                pet,
+                source_path: parsed.to_string(),
+            })
+        })();
+        if result.is_err() {
+            cleanup_pet_staging_dir(&staging_dir, "failed URL pet preview");
+        }
+        result
     }
 
     async fn preview_pet_from_install_link(
@@ -266,23 +271,28 @@ impl CCChanService {
         let staging_id = uuid::Uuid::new_v4().to_string();
         let staging_dir = self.pet_staging_dir().join(&staging_id);
         let pet_dir = staging_dir.join(&pet_id);
-        std::fs::create_dir_all(&pet_dir)?;
-        let sprite_name = format!("spritesheet.{image_ext}");
-        std::fs::write(pet_dir.join(&sprite_name), download.bytes)?;
-        write_single_frame_pet_json(
-            &pet_dir,
-            &pet_id,
-            &link.name,
-            &link.description,
-            &sprite_name,
-        )?;
-
-        let pet = load_pet_from_dir(&pet_dir, PetSource::User)?;
-        Ok(PetInstallPreview {
-            staging_id,
-            pet,
-            source_path: parsed.to_string(),
-        })
+        let result = (|| {
+            std::fs::create_dir_all(&pet_dir)?;
+            let sprite_name = format!("spritesheet.{image_ext}");
+            std::fs::write(pet_dir.join(&sprite_name), download.bytes)?;
+            write_single_frame_pet_json(
+                &pet_dir,
+                &pet_id,
+                &link.name,
+                &link.description,
+                &sprite_name,
+            )?;
+            let pet = load_pet_from_dir(&pet_dir, PetSource::User)?;
+            Ok(PetInstallPreview {
+                staging_id,
+                pet,
+                source_path: parsed.to_string(),
+            })
+        })();
+        if result.is_err() {
+            cleanup_pet_staging_dir(&staging_dir, "failed install-link pet preview");
+        }
+        result
     }
 
     pub fn preview_pet_from_path(&self, path: String) -> AppResult<PetInstallPreview> {
@@ -309,9 +319,15 @@ impl CCChanService {
             }
             staging_id = uuid::Uuid::new_v4().to_string();
             let staging_dir = self.pet_staging_dir().join(&staging_id);
-            std::fs::create_dir_all(&staging_dir)?;
-            extract_pet_zip(&bytes, &staging_dir)?;
-            find_pet_root(&staging_dir)?
+            let result = (|| {
+                std::fs::create_dir_all(&staging_dir)?;
+                extract_pet_zip(&bytes, &staging_dir)?;
+                find_pet_root(&staging_dir)
+            })();
+            if result.is_err() {
+                cleanup_pet_staging_dir(&staging_dir, "failed path pet preview");
+            }
+            result?
         } else {
             find_pet_root(&source)?
         };
@@ -336,13 +352,7 @@ impl CCChanService {
             Ok(pet)
         })();
         if staging_dir.exists() {
-            if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
-                warn!(
-                    path = %staging_dir.display(),
-                    error = %error,
-                    "failed to remove ccchan pet staging directory after preview install attempt"
-                );
-            }
+            cleanup_pet_staging_dir(&staging_dir, "preview install attempt");
         }
         result
     }
@@ -402,13 +412,7 @@ impl CCChanService {
             Ok(pet)
         })();
         if let Some(staging_dir) = staging_dir_to_cleanup {
-            if let Err(error) = std::fs::remove_dir_all(&staging_dir) {
-                warn!(
-                    path = %staging_dir.display(),
-                    error = %error,
-                    "failed to remove ccchan pet staging directory after direct install"
-                );
-            }
+            cleanup_pet_staging_dir(&staging_dir, "direct path install");
         }
         result
     }
@@ -1645,6 +1649,19 @@ fn sanitize_existing_staging_id(staging_id: &str) -> AppResult<String> {
     Ok(sanitized)
 }
 
+fn cleanup_pet_staging_dir(staging_dir: &Path, context: &str) {
+    if !staging_dir.exists() {
+        return;
+    }
+    if let Err(error) = std::fs::remove_dir_all(staging_dir) {
+        warn!(
+            path = %staging_dir.display(),
+            error = %error,
+            "failed to remove ccchan pet staging directory after {context}"
+        );
+    }
+}
+
 fn safe_relative_pet_path(value: &str) -> AppResult<PathBuf> {
     let path = Path::new(value);
     if path.is_absolute()
@@ -2236,6 +2253,36 @@ mod tests {
     }
 
     #[test]
+    fn install_pet_from_source_accepts_custom_dir_that_is_the_pet_root() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let custom_pet_dir = temp.path().join("single-pet");
+        write_minimal_pet(&custom_pet_dir, "single-pet");
+        let settings_service = Arc::new(SettingsService::new());
+        let mut settings = settings_service.get_settings();
+        settings.ccchan.custom_pet_dirs = vec![custom_pet_dir.to_string_lossy().to_string()];
+        settings_service
+            .update_settings(settings)
+            .expect("save settings");
+        let service = CCChanService::new(
+            settings_service,
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let pet = service
+            .install_pet_from_source("single-pet".to_string(), "custom".to_string())
+            .expect("install single-root custom source pet");
+
+        assert_eq!(pet.id, "single-pet");
+        assert_eq!(pet.source, PetSource::User);
+        assert!(data_dir
+            .join("ccchan")
+            .join("pets")
+            .join("single-pet")
+            .exists());
+    }
+
+    #[test]
     fn install_pet_from_source_copies_codex_home_pet_into_user_dir() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let previous_codex_home = std::env::var_os("CODEX_HOME");
@@ -2442,6 +2489,33 @@ mod tests {
         assert_eq!(pet.id, "sample");
         assert!(data_dir.join("ccchan").join("pets").join("sample").exists());
         assert!(!staging_dir.exists());
+    }
+
+    #[test]
+    fn preview_pet_from_path_cleans_zip_staging_after_preview_failure() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let package_path = temp.path().join("broken.zip");
+        let bytes = zip_bytes(&[(
+            "sample/pet.json",
+            br#"{"id":"sample","spritesheetPath":"missing.webp"}"#,
+        )]);
+        std::fs::write(&package_path, bytes).expect("write package");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let error = service
+            .preview_pet_from_path(package_path.to_string_lossy().to_string())
+            .expect_err("broken zip preview should fail");
+
+        assert!(error.to_string().contains("No spritesheet found"));
+        let staging_dir = data_dir.join("ccchan").join("pet-staging");
+        let staging_entries = std::fs::read_dir(&staging_dir)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(staging_entries, 0);
     }
 
     #[test]
