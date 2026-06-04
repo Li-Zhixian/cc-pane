@@ -7,6 +7,7 @@ import type { CCChanSettings, TerminalOutputPayload } from "./types";
 interface ChatPanelProps {
   settings: CCChanSettings;
   sessionId: string | null;
+  visible?: boolean;
   onSessionIdChange: (sessionId: string | null) => void;
   onClose: () => void;
 }
@@ -41,7 +42,7 @@ export function formatChatStartupError(error: unknown, aiEngine: string, runtime
   return `${runtimeLabel} ${engineLabel} 启动失败：${text}`;
 }
 
-export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: ChatPanelProps) {
+export function ChatPanel({ settings, sessionId, visible = true, onSessionIdChange, onClose }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
@@ -178,6 +179,8 @@ export function ChatPanel({ settings, sessionId, onSessionIdChange, onClose }: C
       setLines([]);
     }
   }
+
+  if (!visible) return null;
 
   return (
     <section

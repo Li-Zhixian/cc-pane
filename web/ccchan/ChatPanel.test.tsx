@@ -1,11 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChatPanel, formatChatStartupError } from "./ChatPanel";
 import { DEFAULT_CCCHAN_SETTINGS, DEFAULT_CCCHAN_ROLE_PROMPT } from "@/stores/useCCChanStore";
-import type { CCChanRolePreset, CCChanSettings } from "./types";
+import type { CCChanRolePreset, CCChanSettings, TerminalOutputPayload } from "./types";
 
 const defaultRole: CCChanRolePreset = {
   id: "claude-local",
@@ -205,5 +205,68 @@ describe("ChatPanel", () => {
 
     expect(invoke).toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
     expect(onSessionIdChange).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps listening and replays output while hidden", async () => {
+    const handlers: {
+      output?: (event: { payload: TerminalOutputPayload }) => void;
+    } = {};
+    vi.mocked(listen).mockImplementation((eventName, handler) => {
+      if (eventName === "terminal-output") {
+        handlers.output = handler as (event: { payload: TerminalOutputPayload }) => void;
+      }
+      return Promise.resolve(() => {});
+    });
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        visible={false}
+        onSessionIdChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(handlers.output).toBeTruthy();
+    });
+    act(() => {
+      handlers.output?.({
+        payload: { sessionId: "active-session", data: "hidden output\n" },
+      });
+    });
+
+    rerender(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        visible
+        onSessionIdChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/hidden output/)).toBeInTheDocument();
+  });
+
+  it("closes the panel without stopping the active session", async () => {
+    const onClose = vi.fn();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    render(
+      <ChatPanel
+        settings={makeSettings()}
+        sessionId="active-session"
+        onSessionIdChange={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "关闭 chat" }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("stop_ccchan_chat", { sessionId: "active-session" });
   });
 });

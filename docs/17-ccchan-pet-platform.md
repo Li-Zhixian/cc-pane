@@ -28,6 +28,8 @@ Role chat runtime supports `local` and explicit `wsl`. WSL chat requires a role-
 
 The chat panel blocks obviously invalid WSL role paths before starting a PTY and formats startup failures into actionable CLI, WSL, MCP, or provider/auth hints. The backend serializes ccchan chat start/stop lifecycle operations so rapid role switches or a stop request during startup cannot interleave session id mutation with PTY kill/create.
 
+Closing the chat panel only collapses the ccchan window back to the pet size. The active chat PTY stays mounted in the hidden panel, terminal output continues to be buffered, and reopening the panel replays output captured while hidden. The explicit stop button still terminates the active chat session and clears the visible transcript.
+
 The ccchan window uses consistent sizes across frontend and backend resize commands: collapsed pet `120x120`, chat `460x640`, and context menu `460x260`.
 
 ## Pet Package Format

@@ -398,10 +398,11 @@ export function CCChanApp() {
           pointerEvents: expanded ? "auto" : "none",
         }}
       >
-        {expanded && (
+        {(expanded || chatSessionId) && (
           <ChatPanel
             settings={settings}
             sessionId={chatSessionId}
+            visible={expanded}
             onSessionIdChange={setChatSessionId}
             onClose={() => void closeChat().catch(() => {})}
           />
