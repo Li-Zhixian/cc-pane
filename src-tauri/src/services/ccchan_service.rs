@@ -802,14 +802,7 @@ impl CCChanService {
             return;
         };
 
-        let title = ccchan_session_title(session_id);
-        let payload = serde_json::json!({
-            "kind": kind,
-            "sessionId": session_id,
-            "title": title,
-            "ok": ok,
-            "ts": current_epoch_seconds(),
-        });
+        let payload = ccchan_event_payload(kind, session_id, ok, current_epoch_seconds());
         if let Err(error) = app.emit(CCCHAN_EVENT, payload) {
             warn!(session_id, kind, error = %error, "failed to emit ccchan event");
         }
@@ -1852,6 +1845,16 @@ fn current_epoch_seconds() -> u64 {
         .as_secs()
 }
 
+fn ccchan_event_payload(kind: &str, session_id: &str, ok: bool, ts: u64) -> serde_json::Value {
+    serde_json::json!({
+        "kind": kind,
+        "sessionId": session_id,
+        "title": ccchan_session_title(session_id),
+        "ok": ok,
+        "ts": ts,
+    })
+}
+
 fn ccchan_session_title(session_id: &str) -> String {
     let trimmed = session_id.trim();
     if trimmed.is_empty() {
@@ -2457,6 +2460,24 @@ mod tests {
             "Session 12345678"
         );
         assert_eq!(ccchan_session_title("   "), "Session");
+    }
+
+    #[test]
+    fn ccchan_event_payload_maps_status_events_for_notifications() {
+        let waiting = ccchan_event_payload("task-waiting", "12345678-90ab-cdef", true, 42);
+        assert_eq!(waiting["kind"], "task-waiting");
+        assert_eq!(waiting["sessionId"], "12345678-90ab-cdef");
+        assert_eq!(waiting["title"], "Session 12345678");
+        assert_eq!(waiting["ok"], true);
+        assert_eq!(waiting["ts"], 42);
+
+        let complete = ccchan_event_payload("task-complete", "ok-session", true, 43);
+        assert_eq!(complete["kind"], "task-complete");
+        assert_eq!(complete["ok"], true);
+
+        let failed = ccchan_event_payload("task-failed", "bad-session", false, 44);
+        assert_eq!(failed["kind"], "task-failed");
+        assert_eq!(failed["ok"], false);
     }
 
     #[test]
