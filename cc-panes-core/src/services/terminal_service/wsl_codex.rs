@@ -65,6 +65,21 @@ fn shell_escape_posix(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+fn push_wsl_cli_path_guard(remote_parts: &mut Vec<String>, command: &str) {
+    remote_parts.push(format!(
+        concat!(
+            "CCPANES_WSL_CLI_NAME={}\n",
+            "CCPANES_WSL_CLI_PATH=\"$(command -v \"$CCPANES_WSL_CLI_NAME\" || true)\"\n",
+            "if [ -z \"$CCPANES_WSL_CLI_PATH\" ]; then echo \"CC-Panes WSL error: $CCPANES_WSL_CLI_NAME was not found inside WSL. Install it in this WSL distro or switch the role/runtime to local.\" >&2; exit 127; fi\n",
+            "CCPANES_WSL_CLI_REAL_PATH=\"$CCPANES_WSL_CLI_PATH\"\n",
+            "if command -v readlink >/dev/null 2>&1; then CCPANES_WSL_CLI_REAL_PATH=\"$(readlink -f \"$CCPANES_WSL_CLI_PATH\" 2>/dev/null || printf '%s' \"$CCPANES_WSL_CLI_PATH\")\"; fi\n",
+            "case \"$CCPANES_WSL_CLI_PATH\" in /mnt/*) echo \"CC-Panes WSL error: $CCPANES_WSL_CLI_NAME resolves to Windows executable at $CCPANES_WSL_CLI_PATH. Install the CLI inside WSL or remove Windows PATH entries from WSL PATH.\" >&2; exit 127;; esac\n",
+            "case \"$CCPANES_WSL_CLI_REAL_PATH\" in /mnt/*) echo \"CC-Panes WSL error: $CCPANES_WSL_CLI_NAME resolves to Windows executable at $CCPANES_WSL_CLI_REAL_PATH. Install the CLI inside WSL or remove Windows PATH entries from WSL PATH.\" >&2; exit 127;; esac"
+        ),
+        shell_escape_posix(command)
+    ));
+}
+
 fn sanitize_wsl_script_component(value: &str) -> String {
     let sanitized = value
         .chars()
@@ -750,6 +765,7 @@ impl TerminalService {
         if !is_wsl_home_path(launch_cwd) {
             remote_parts.push(format!("cd {}", Self::shell_escape(launch_cwd)));
         }
+        push_wsl_cli_path_guard(&mut remote_parts, command);
 
         let mut cli_args = Vec::new();
         if cli_tool == CliTool::Claude {
@@ -818,9 +834,9 @@ impl TerminalService {
             .collect::<Vec<_>>()
             .join(" ");
         remote_parts.push(if escaped_cli_args.is_empty() {
-            format!("exec {}", command)
+            "exec \"$CCPANES_WSL_CLI_PATH\"".to_string()
         } else {
-            format!("exec {} {}", command, escaped_cli_args)
+            format!("exec \"$CCPANES_WSL_CLI_PATH\" {}", escaped_cli_args)
         });
 
         self.build_wsl_script_command(wsl, session_id, command, remote_parts)
@@ -1003,6 +1019,7 @@ impl TerminalService {
                 Self::shell_escape(token)
             ));
         }
+        push_wsl_cli_path_guard(&mut remote_parts, codex_path);
 
         if wsl.remote_path != "~" && wsl.remote_path != "~/" {
             codex_args.push("-C".to_string());
@@ -1018,8 +1035,7 @@ impl TerminalService {
             .join(" ");
         remote_parts.push(format!(
             "exec {} {}",
-            Self::shell_escape(codex_path),
-            escaped_codex_args
+            "\"$CCPANES_WSL_CLI_PATH\"", escaped_codex_args
         ));
 
         self.build_wsl_script_command(wsl, session_id, "codex", remote_parts)
@@ -1049,7 +1065,7 @@ impl TerminalService {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_codex_resume_args, push_codex_developer_instructions_arg,
+        append_codex_resume_args, push_codex_developer_instructions_arg, push_wsl_cli_path_guard,
         push_wsl_codex_mcp_isolation_prelude, render_wsl_launch_script,
     };
     #[cfg(windows)]
@@ -1156,6 +1172,22 @@ mod tests {
             script,
             "#!/usr/bin/env bash\nset -e\nexport TOKEN='secret'\nexec codex '-C' '/mnt/d/repo'\n"
         );
+    }
+
+    #[test]
+    fn wsl_cli_path_guard_rejects_windows_mounted_shims() {
+        let mut commands = Vec::new();
+
+        push_wsl_cli_path_guard(&mut commands, "claude");
+        let script = render_wsl_launch_script(&commands);
+
+        assert!(script.contains("CCPANES_WSL_CLI_NAME='claude'"));
+        assert!(script.contains("command -v \"$CCPANES_WSL_CLI_NAME\""));
+        assert!(script.contains("case \"$CCPANES_WSL_CLI_PATH\" in /mnt/*)"));
+        assert!(script.contains("CCPANES_WSL_CLI_REAL_PATH"));
+        assert!(script.contains("readlink -f \"$CCPANES_WSL_CLI_PATH\""));
+        assert!(script.contains("case \"$CCPANES_WSL_CLI_REAL_PATH\" in /mnt/*)"));
+        assert!(script.contains("resolves to Windows executable"));
     }
 
     #[test]
