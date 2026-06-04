@@ -106,13 +106,20 @@ Windows-host-required validation still applies for desktop behavior: transparent
 Current-environment-verifiable:
 
 - TypeScript: `npx tsc --noEmit --pretty false`.
-- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx`.
+- Frontend focused checks: `npx vitest run web/stores/useCCChanStore.test.ts web/components/settings/CCChanSettings.test.tsx web/components/SettingsPanel.test.tsx web/stores/useSettingsStore.test.ts web/utils/notificationSound.test.ts web/ccchan/statusAggregator.test.ts web/ccchan/SessionDots.test.tsx web/ccchan/installPet.test.ts`.
 - Rust model/adapter checks: `cargo test -p cc-panes-core ccchan_ -- --nocapture`, `cargo test -p cc-panes-core wsl_hook_sync -- --nocapture`, `cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture`, `cargo test -p cc-cli-adapters codex -- --nocapture`, `cargo check -p cc-panes-core && cargo check -p cc-cli-adapters`.
 - Formatting and patch hygiene: `cargo fmt --all -- --check`, `git diff --check`.
+
+Windows-host compile/build checks run from WSL through PowerShell:
+
+- `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo check -p cc-panes"`.
+- `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npm run build"`.
+- `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/installPet.test.ts web/components/settings/CCChanSettings.test.tsx --reporter=dot"`.
 
 Current WSL limitation:
 
 - `cargo check -p cc-panes` and `cargo test -p cc-panes ccchan_ -- --nocapture` require Linux WebKit/GTK pkg-config dependencies (`glib-2.0`, `gobject-2.0`, `gio-2.0`) in this WSL environment.
+- Windows `cargo test -p cc-panes ccchan_ -- --nocapture` currently compiles the test binary but the binary exits before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; this still needs a Windows host runtime environment check separate from compile validation.
 
 Windows-host-required:
 

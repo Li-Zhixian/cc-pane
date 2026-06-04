@@ -8,6 +8,7 @@ use crate::services::{SettingsService, TerminalService};
 use crate::utils::{AppError, AppPaths, AppResult};
 use cc_panes_core::events::SessionNotifier;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -117,6 +118,7 @@ pub struct PetInstallPreview {
     pub source_path: String,
 }
 
+#[derive(Debug)]
 struct PetInstallLink {
     name: String,
     image_url: reqwest::Url,
@@ -240,7 +242,8 @@ impl CCChanService {
         let definition: PetDefinition = serde_json::from_slice(&pet_json.bytes)
             .map_err(|error| AppError::from(format!("Invalid Awesome Codex pet.json: {error}")))?;
         let sprite_path = awesome_codex_sprite_path(&definition.spritesheet_path)?;
-        let sprite_url = awesome_codex_pet_url(&format!("pets/{slug}/{sprite_path}"))?;
+        let sprite_url =
+            awesome_codex_pet_url(&format!("pets/{slug}/{}", sprite_path.to_string_lossy()))?;
         let sprite = download_limited_pet_url(sprite_url, "Awesome Codex pet spritesheet").await?;
 
         let staging_id = uuid::Uuid::new_v4().to_string();
@@ -314,7 +317,7 @@ impl CCChanService {
         let image_ext =
             pet_image_extension_from_download(&link.image_url, &download.headers, &download.bytes)?;
 
-        let pet_id = sanitized_pet_dir_name(&link.name)?;
+        let pet_id = pet_install_link_pet_id(&link.name, link.image_url.as_str());
         let staging_id = uuid::Uuid::new_v4().to_string();
         let staging_dir = self.pet_staging_dir().join(&staging_id);
         let pet_dir = staging_dir.join(&pet_id);
@@ -1197,16 +1200,20 @@ fn parse_pet_install_link(parsed: &reqwest::Url) -> AppResult<PetInstallLink> {
             "ccchan only supports codex://pets/install or ccpanes://pets/install pet links",
         ));
     }
-    if parsed.host_str() != Some("pets") || parsed.path() != "/install" {
+    let path = parsed.path().trim_end_matches('/');
+    if parsed.host_str() != Some("pets") || path != "/install" {
         return Err(AppError::from(
             "ccchan only supports codex://pets/install or ccpanes://pets/install pet links",
         ));
     }
     let name = codex_pet_query_value(parsed, "name")
         .ok_or_else(|| AppError::from("pet install link requires name="))?;
-    let image_url = codex_pet_query_value(parsed, "imageUrl")
-        .ok_or_else(|| AppError::from("pet install link requires imageUrl="))?;
-    let description = codex_pet_query_value(parsed, "description")
+    let image_url = codex_pet_query_value_any(
+        parsed,
+        &["imageUrl", "imageURL", "image_url", "image-url", "url"],
+    )
+    .ok_or_else(|| AppError::from("pet install link requires imageUrl="))?;
+    let description = codex_pet_query_value_any(parsed, &["description", "desc"])
         .unwrap_or_else(|| format!("{name} imported from a pet install link"));
 
     let image_url = reqwest::Url::parse(&image_url)
@@ -1275,6 +1282,23 @@ fn codex_pet_query_value(parsed: &reqwest::Url, key: &str) -> Option<String> {
         .find_map(|(item_key, value)| (item_key == key).then(|| value.into_owned()))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn codex_pet_query_value_any(parsed: &reqwest::Url, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| codex_pet_query_value(parsed, key))
+}
+
+fn pet_install_link_pet_id(name: &str, image_url: &str) -> String {
+    let sanitized = sanitize_path_segment(name);
+    if !sanitized.is_empty() {
+        return sanitized;
+    }
+    let digest = Sha256::digest(format!("{name}\n{image_url}").as_bytes());
+    format!(
+        "pet-{:02x}{:02x}{:02x}{:02x}",
+        digest[0], digest[1], digest[2], digest[3]
+    )
 }
 
 async fn download_limited_pet_url(
@@ -1406,7 +1430,8 @@ fn write_single_frame_pet_json(
     });
     std::fs::write(
         pet_dir.join("pet.json"),
-        serde_json::to_string_pretty(&pet_json)?,
+        serde_json::to_string_pretty(&pet_json)
+            .map_err(|error| AppError::from(format!("Invalid generated pet.json: {error}")))?,
     )?;
     Ok(())
 }
@@ -1767,6 +1792,14 @@ mod tests {
     }
 
     #[test]
+    fn pet_install_link_pet_id_falls_back_for_non_ascii_names() {
+        let id = pet_install_link_pet_id("猫", "https://example.invalid/cat.webp");
+
+        assert!(id.starts_with("pet-"));
+        assert_eq!(id.len(), 12);
+    }
+
+    #[test]
     fn safe_relative_pet_path_rejects_paths_outside_pet_folder() {
         assert!(safe_relative_pet_path("spritesheet.webp").is_ok());
         assert!(safe_relative_pet_path("assets/spritesheet.webp").is_ok());
@@ -1801,7 +1834,7 @@ mod tests {
         assert_eq!(parsed.description, "Hi");
 
         let ccpanes = reqwest::Url::parse(
-            "ccpanes://pets/install?name=Homie&imageUrl=https%3A%2F%2Fexample.invalid%2Fhomie.png",
+            "ccpanes://pets/install/?name=Homie&image_url=https%3A%2F%2Fexample.invalid%2Fhomie.png&desc=Short",
         )
         .expect("url");
         let parsed = parse_pet_install_link(&ccpanes).expect("parse ccpanes link");
@@ -1810,7 +1843,7 @@ mod tests {
             parsed.image_url.as_str(),
             "https://example.invalid/homie.png"
         );
-        assert_eq!(parsed.description, "Homie imported from a pet install link");
+        assert_eq!(parsed.description, "Short");
 
         let insecure = reqwest::Url::parse(
             "codex://pets/install?name=Doro&imageUrl=http://example.invalid/doro.webp",

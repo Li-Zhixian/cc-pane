@@ -18,7 +18,7 @@ export function isCCPanesPetInstallLink(url: string): boolean {
     return (
       parsed.protocol === "ccpanes:" &&
       parsed.hostname === "pets" &&
-      parsed.pathname === "/install"
+      parsed.pathname.replace(/\/+$/, "") === "/install"
     );
   } catch {
     return false;
