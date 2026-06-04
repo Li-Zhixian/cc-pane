@@ -115,6 +115,7 @@ Windows-host compile/build checks run from WSL through PowerShell:
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo check -p cc-panes"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npm run build"`.
 - `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; npx vitest run web/ccchan/installPet.test.ts web/components/settings/CCChanSettings.test.tsx --reporter=dot"`.
+- `powershell.exe -NoProfile -Command "Set-Location 'D:\my-project\cc-pane'; cargo test -p cc-panes-core wsl_hook_sync -- --nocapture; cargo test -p cc-panes-core wsl_remote_project_path_to_host_path -- --nocapture; cargo test -p cc-cli-adapters codex -- --nocapture"` verifies WSL path mapping plus Codex Windows unsupported/WSL sync adapter behavior.
 
 Windows-host runtime checks performed against `npm run tauri:dev` on this branch:
 
