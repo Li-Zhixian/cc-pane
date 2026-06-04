@@ -30,6 +30,7 @@ export function SpritePet({
     <button
       type="button"
       data-tauri-drag-region
+      data-pet-state={state}
       aria-label={title ?? pet.displayName}
       title={title ?? pet.displayName}
       onClick={onClick}

@@ -99,6 +99,9 @@ describe("CCChanApp", () => {
       handlers.activeSession?.({ payload: { sessionId: "focused-session" } });
     });
 
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "打开 cc酱 chat" })).toHaveAttribute("data-pet-state", "waiting");
+    });
     expect(await screen.findByRole("button", { name: "Focus session focused-session" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Focus session inactive-session" })).not.toBeInTheDocument();
 
