@@ -2267,6 +2267,69 @@ mod tests {
     }
 
     #[test]
+    fn install_pet_from_source_returns_not_found_for_missing_custom_pet() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let custom_root = temp.path().join("custom-pets");
+        std::fs::create_dir_all(&custom_root).expect("create custom root");
+        let settings_service = Arc::new(SettingsService::new());
+        let mut settings = settings_service.get_settings();
+        settings.ccchan.custom_pet_dirs = vec![custom_root.to_string_lossy().to_string()];
+        settings_service
+            .update_settings(settings)
+            .expect("save settings");
+        let service = CCChanService::new(
+            settings_service,
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let error = service
+            .install_pet_from_source("missing".to_string(), "custom".to_string())
+            .expect_err("missing custom pet should return not found");
+
+        assert!(error
+            .to_string()
+            .contains("ccchan custom pet 'missing' not found"));
+        assert!(!data_dir
+            .join("ccchan")
+            .join("pets")
+            .join("missing")
+            .exists());
+    }
+
+    #[test]
+    fn install_pet_from_source_returns_not_found_for_missing_codex_home_pet() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous_codex_home = std::env::var_os("CODEX_HOME");
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let codex_home = temp.path().join("codex-home");
+        std::fs::create_dir_all(codex_home.join("pets")).expect("create codex pets root");
+        std::env::set_var("CODEX_HOME", &codex_home);
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let result =
+            service.install_pet_from_source("missing".to_string(), "codexHome".to_string());
+        match previous_codex_home {
+            Some(value) => std::env::set_var("CODEX_HOME", value),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+
+        let error = result.expect_err("missing codex home pet should return not found");
+        assert!(error
+            .to_string()
+            .contains("ccchan Codex Home pet 'missing' not found"));
+        assert!(!data_dir
+            .join("ccchan")
+            .join("pets")
+            .join("missing")
+            .exists());
+    }
+
+    #[test]
     fn install_pet_from_source_rejects_non_readonly_sources() {
         let temp = tempdir().expect("tempdir");
         let service = CCChanService::new(
@@ -2276,11 +2339,40 @@ mod tests {
             ))),
         );
 
-        let error = service
-            .install_pet_from_source("sample".to_string(), "user".to_string())
-            .expect_err("user source should be rejected");
+        for source in ["builtin", "user", ""] {
+            let error = service
+                .install_pet_from_source("sample".to_string(), source.to_string())
+                .expect_err("non readonly source should be rejected");
 
-        assert!(error.to_string().contains("readonly custom or codexHome"));
+            assert!(error.to_string().contains("readonly custom or codexHome"));
+        }
+    }
+
+    #[test]
+    fn install_pet_from_path_copies_folder_pet_into_user_dir_without_staging() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let pet_dir = temp.path().join("folder-pet");
+        write_minimal_pet(&pet_dir, "folder-pet");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let pet = service
+            .install_pet_from_path(pet_dir.to_string_lossy().to_string())
+            .expect("install folder pet");
+
+        assert_eq!(pet.id, "folder-pet");
+        assert_eq!(pet.source, PetSource::User);
+        assert!(pet_dir.join("pet.json").exists());
+        assert!(data_dir
+            .join("ccchan")
+            .join("pets")
+            .join("folder-pet")
+            .join("pet.json")
+            .exists());
+        assert!(!data_dir.join("ccchan").join("pet-staging").exists());
     }
 
     #[test]
@@ -2316,6 +2408,43 @@ mod tests {
     }
 
     #[test]
+    fn preview_zip_then_install_from_preview_copies_pet_and_cleans_staging() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let package_path = temp.path().join("sample.zip");
+        let bytes = zip_bytes(&[
+            (
+                "sample/pet.json",
+                br#"{"id":"sample","spritesheetPath":"spritesheet.webp"}"#,
+            ),
+            ("sample/spritesheet.webp", &[1_u8, 2, 3]),
+        ]);
+        std::fs::write(&package_path, bytes).expect("write package");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let preview = service
+            .preview_pet_from_path(package_path.to_string_lossy().to_string())
+            .expect("preview zip pet");
+        let staging_dir = data_dir
+            .join("ccchan")
+            .join("pet-staging")
+            .join(&preview.staging_id);
+        assert_eq!(preview.pet.id, "sample");
+        assert!(staging_dir.exists());
+
+        let pet = service
+            .install_pet_from_preview(preview.staging_id)
+            .expect("install previewed pet");
+
+        assert_eq!(pet.id, "sample");
+        assert!(data_dir.join("ccchan").join("pets").join("sample").exists());
+        assert!(!staging_dir.exists());
+    }
+
+    #[test]
     fn preview_pet_from_path_rejects_folder_before_confirm_when_copy_limits_fail() {
         let temp = tempdir().expect("tempdir");
         let data_dir = temp.path().join("data");
@@ -2336,6 +2465,41 @@ mod tests {
 
         assert!(error.to_string().contains("too many files"));
         assert!(!data_dir.join("ccchan").join("pet-staging").exists());
+    }
+
+    #[test]
+    fn cancel_pet_preview_removes_zip_preview_staging() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let package_path = temp.path().join("sample.zip");
+        let bytes = zip_bytes(&[
+            (
+                "sample/pet.json",
+                br#"{"id":"sample","spritesheetPath":"spritesheet.webp"}"#,
+            ),
+            ("sample/spritesheet.webp", &[1_u8, 2, 3]),
+        ]);
+        std::fs::write(&package_path, bytes).expect("write package");
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let preview = service
+            .preview_pet_from_path(package_path.to_string_lossy().to_string())
+            .expect("preview zip pet");
+        let staging_dir = data_dir
+            .join("ccchan")
+            .join("pet-staging")
+            .join(&preview.staging_id);
+        assert!(staging_dir.exists());
+
+        service
+            .cancel_pet_preview(preview.staging_id)
+            .expect("cancel preview");
+
+        assert!(!staging_dir.exists());
+        assert!(!data_dir.join("ccchan").join("pets").join("sample").exists());
     }
 
     #[test]
