@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CCCHAN_ROLE_PROMPT, FALLBACK_PET, normalizeCCChanSettings, useCCChanStore } from "@/stores/useCCChanStore";
-import { previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
+import { confirmCCChanAction, previewAndInstallCCChanPetUrl } from "@/ccchan/installPet";
 import type {
   AwesomeCodexPetEntry,
   CCChanPetInstallPreview,
@@ -203,7 +203,10 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     if (typeof selected !== "string") return;
     try {
       const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_pet_from_path", { path: selected });
-      const confirmed = window.confirm(`安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`);
+      const confirmed = await confirmCCChanAction(
+        `安装桌宠 "${preview.pet.displayName}" (${preview.pet.id})？`,
+        { okLabel: "安装" },
+      );
       if (!confirmed) return;
       if (directory) {
         await invoke("install_ccchan_pet_from_path", { path: selected });
@@ -242,7 +245,10 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
   async function deleteUserPet(petId: string) {
     const pet = petOptions.find((item) => item.id === petId);
     if (!pet || pet.source !== "user") return;
-    const confirmed = window.confirm(`删除用户安装的桌宠 "${pet.displayName}" (${pet.id})？`);
+    const confirmed = await confirmCCChanAction(
+      `删除用户安装的桌宠 "${pet.displayName}" (${pet.id})？`,
+      { kind: "warning", okLabel: "删除" },
+    );
     if (!confirmed) return;
     try {
       await invoke("delete_ccchan_user_pet", { petId: pet.id });
@@ -290,7 +296,10 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
     setAwesomeInstallSlug(entry.slug);
     try {
       const preview = await invoke<CCChanPetInstallPreview>("preview_ccchan_awesome_codex_pet", { slug: entry.slug });
-      const confirmed = window.confirm(`安装 Awesome Codex Pet "${preview.pet.displayName}" (${preview.pet.id})？`);
+      const confirmed = await confirmCCChanAction(
+        `安装 Awesome Codex Pet "${preview.pet.displayName}" (${preview.pet.id})？`,
+        { okLabel: "安装" },
+      );
       if (!confirmed) return;
       await invoke("install_ccchan_pet_from_preview", { stagingId: preview.stagingId });
       await load();

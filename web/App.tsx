@@ -243,6 +243,20 @@ function MainApp() {
     let unlistenFocus: (() => void) | null = null;
     let unlistenSettings: (() => void) | null = null;
     let unlistenOpenUrl: (() => void) | null = null;
+    let deepLinkQueue = Promise.resolve();
+    const enqueueDeepLinks = (urls: string[]) => {
+      deepLinkQueue = deepLinkQueue
+        .catch((error) => {
+          console.warn("ccpanes previous deep link handling failed:", error);
+        })
+        .then(async () => {
+          if (cancelled) return;
+          await handleCCPanesDeepLinks(urls);
+        })
+        .catch((error) => {
+          console.warn("ccpanes deep link handling failed:", error);
+        });
+    };
 
     listen<{ sessionId?: string }>("ccchan:focus-session", (event) => {
       if (cancelled) return;
@@ -268,7 +282,7 @@ function MainApp() {
     });
 
     onOpenUrl((urls) => {
-      if (!cancelled) void handleCCPanesDeepLinks(urls);
+      if (!cancelled) enqueueDeepLinks(urls);
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenOpenUrl = fn;
@@ -278,7 +292,7 @@ function MainApp() {
 
     getCurrentDeepLinks()
       .then((urls) => {
-        if (!cancelled && urls) void handleCCPanesDeepLinks(urls);
+        if (!cancelled && urls) enqueueDeepLinks(urls);
       })
       .catch((error) => {
         console.warn("ccpanes current deep links failed:", error);

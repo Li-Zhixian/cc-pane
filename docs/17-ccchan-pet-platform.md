@@ -85,6 +85,8 @@ Awesome Codex Pet catalog installs are pinned to `https://raw.githubusercontent.
 
 Official Codex app pets support `codex://pets/install?name=&imageUrl=` deep links when that Codex app feature is enabled, and Codex can refresh custom pets from the user's local Codex home. CC-Panes does not depend on the Codex app flow: it can import pasted Codex links from the ccchan settings URL installer, reads Codex Home pets, and supports package import directly. CC-Panes intentionally does not register the global `codex://` OS scheme because that belongs to the Codex app. CC-Panes registers its own `ccpanes://` desktop scheme through Tauri's deep-link and single-instance plugins; `ccpanes://pets/install?name=&imageUrl=` opens/focuses the main window, switches to ccchan settings, previews the pet, asks for confirmation, then installs through the same staging flow as pasted URL installs.
 
+Install confirmations use `@tauri-apps/plugin-dialog` instead of `window.confirm`. The default dialog capability allows message, save, and open commands, but not the deprecated confirm alias used by WebView confirm compatibility paths, so `src-tauri/capabilities/default.json` also grants `dialog:allow-confirm`. This prevents `dialog.confirm not allowed. Command not found` during Windows deep-link installs.
+
 ## Runtime Status
 
 ccchan combines two status paths:
@@ -125,6 +127,8 @@ Windows-host runtime checks performed against `npm run tauri:dev` on this branch
 - `HKCU\Software\Classes\ccpanes\shell\open\command` points to `"D:\my-project\cc-pane\target\debug\cc-panes.exe" "%1"` while the dev app is running.
 - Triggering `ccpanes://pets/install/?name=DeepLinkProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` and a real `awesome-codex-pet` style link did not leave a second `cc-panes.exe` process running, confirming single-instance forwarding at the process level.
 - With the dev app stopped and Vite still serving `localhost:14200`, triggering `ccpanes://pets/install/?name=ColdStartProbe&imageUrl=https%3A%2F%2Fexample.invalid%2Fprobe.webp` cold-started `D:\my-project\cc-pane\target\debug\cc-panes.exe`; the main window and `120x120` ccchan window were created and boot logs reached `=== setup complete ===`.
+- Triggering `ccpanes://pets/install/?name=NetworkDialogFix&image_url=https%3A%2F%2Fplacehold.co%2F192x208.png&desc=Network%20install%20probe` on Windows dev created a native ccchan confirmation dialog, installed the remote image pet after pressing the install button, and wrote `C:\Users\ROG\.cc-panes-dev\ccchan\pets\NetworkDialogFix\pet.json` plus `spritesheet.png`. The dev log did not show the previous `dialog.confirm not allowed` rejection.
+- Runtime probes through the same `TerminalService.create_session` path used by ccchan chat verified Windows local Codex, Windows local Claude, WSL Codex, and WSL Claude launch plumbing. Windows local Codex spawned `C:\Users\ROG\AppData\Roaming\npm\codex.cmd`; Windows local Claude spawned `C:\Users\ROG\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe`; WSL Codex and WSL Claude entered `create_session: WSL mode` with `remote_path=/mnt/d/my-project/cc-pane` and spawned `C:\WINDOWS\system32\wsl.exe`. WSL Codex stayed live until killed by the probe. WSL Claude created and attached the PTY, then exited quickly with exit code 1 in this probe run; `wsl.exe -d Ubuntu-24.04 -- bash -lc "command -v claude; claude --version"` still reports Claude Code `2.1.159`, so the remaining gap is an interactive Claude WSL chat transcript, not the CC-Panes WSL launch path.
 - A desktop screenshot captured during the run shows the ccchan settings panel open in the dev app and the mascot visible on the desktop; the screenshot is stored outside git under `_mod_memory/ccpanes-dev-screenshot.png`.
 
 Current WSL limitation:
@@ -137,10 +141,10 @@ Windows-host-required:
 
 - Launch the dev or built Tauri app on Windows and verify the transparent ccchan WebView2 window, always-on-top, drag movement, tray/status-bar show-hide, settings `windowVisible`, and multi-monitor positioning.
 - Verify `ccpanes://` protocol registration on Windows, including cold-start URL handling and second-instance URL forwarding into the already-running main window.
-- Verify `ccpanes://` install confirmation and download with a network that can fetch the target HTTPS asset. Cold-start process launch and second-instance forwarding have Windows dev-run evidence above.
-- Verify Claude Code and Codex chat launch for local Windows roles and explicit WSL roles, including the absolute WSL remote path error state, successful remote path startup, and hook files written to the mapped host project path.
+- Verify `ccpanes://` install confirmation and download with additional community assets. A real Windows dev-run install with `placehold.co` has passed; GitHub raw assets still require a Windows network that can resolve and fetch `raw.githubusercontent.com`.
+- Verify an interactive Claude WSL chat transcript from the ccchan UI. Launch plumbing for Windows local Claude/Codex and WSL Claude/Codex has Windows dev-run evidence above; WSL Claude still needs a manual interactive chat check because the automated probe exited quickly after PTY attach.
 - Verify status updates for Claude and Codex through project hooks when supported, and through terminal/session fallback when hooks are degraded or unsupported.
-- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, `ccpanes://pets/install` OS deep-link click, Codex Home/custom directories, and the Awesome Codex Pet catalog.
+- Install pets from folder, zip, HTTPS URL, `codex://pets/install` paste, `ccpanes://pets/install` paste, Codex Home/custom directories, and the Awesome Codex Pet catalog. `ccpanes://pets/install` OS deep-link click has passed on Windows dev with a reachable HTTPS asset.
 
 Commit convention:
 
