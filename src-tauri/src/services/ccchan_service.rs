@@ -1869,8 +1869,11 @@ fn ccchan_session_title(session_id: &str) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
     use zip::write::SimpleFileOptions;
+
+    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
     fn write_minimal_pet(dir: &Path, id: &str) {
         std::fs::create_dir_all(dir).expect("create pet dir");
@@ -2227,6 +2230,37 @@ mod tests {
         assert_eq!(pet.id, "sample");
         assert_eq!(pet.source, PetSource::User);
         assert!(data_dir.join("ccchan").join("pets").join("sample").exists());
+    }
+
+    #[test]
+    fn install_pet_from_source_copies_codex_home_pet_into_user_dir() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous_codex_home = std::env::var_os("CODEX_HOME");
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join("data");
+        let codex_home = temp.path().join("codex-home");
+        write_minimal_pet(&codex_home.join("pets").join("codex-pet"), "codex-pet");
+        std::env::set_var("CODEX_HOME", &codex_home);
+        let service = CCChanService::new(
+            Arc::new(SettingsService::new()),
+            Arc::new(AppPaths::new(Some(data_dir.to_string_lossy().to_string()))),
+        );
+
+        let result =
+            service.install_pet_from_source("codex-pet".to_string(), "codexHome".to_string());
+        match previous_codex_home {
+            Some(value) => std::env::set_var("CODEX_HOME", value),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+
+        let pet = result.expect("install codex home source pet");
+        assert_eq!(pet.id, "codex-pet");
+        assert_eq!(pet.source, PetSource::User);
+        assert!(data_dir
+            .join("ccchan")
+            .join("pets")
+            .join("codex-pet")
+            .exists());
     }
 
     #[test]

@@ -298,7 +298,13 @@ export default function CCChanSettings({ value, onChange }: CCChanSettingsProps)
       title: "选择额外 cc酱宠物目录",
     });
     if (typeof selected !== "string") return;
-    update("customPetDirs", [...value.customPetDirs, selected]);
+    const nextDir = selected.trim();
+    if (!nextDir) return;
+    if (value.customPetDirs.some((dir) => dir.trim() === nextDir)) {
+      toast.success("该宠物目录已存在");
+      return;
+    }
+    update("customPetDirs", [...value.customPetDirs, nextDir]);
     toast.success("已添加额外宠物目录，保存后生效");
   }
 

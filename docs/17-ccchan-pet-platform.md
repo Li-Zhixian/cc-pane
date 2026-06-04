@@ -144,7 +144,7 @@ Current WSL limitation:
 
 - `cargo check -p cc-panes` and `cargo test -p cc-panes ccchan_ -- --nocapture` require Linux WebKit/GTK pkg-config dependencies (`glib-2.0`, `gobject-2.0`, `gio-2.0`) in this WSL environment.
 - Windows `cargo test -p cc-panes ccchan_ -- --nocapture` currently compiles the test binary but the binary exits before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; this still needs a Windows host runtime environment check separate from compile validation.
-- The Windows host could not resolve `raw.githubusercontent.com` during runtime validation, so a real Awesome Codex Pet image deep-link could not complete the remote HTTPS download path in that environment. Re-run pet install validation on a Windows network that can resolve and fetch GitHub raw assets.
+- The Windows host could not resolve `raw.githubusercontent.com` during runtime validation. A fresh PowerShell probe still resolved it to `0.0.0.0` / `::`, and `Invoke-WebRequest https://raw.githubusercontent.com/legeling/awesome-codex-pet/main/pets.json` failed with a remote-name resolution error. Re-run pet install validation on a Windows network that can resolve and fetch GitHub raw assets.
 
 Windows-host-required:
 

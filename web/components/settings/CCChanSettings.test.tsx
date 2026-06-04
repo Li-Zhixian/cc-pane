@@ -450,6 +450,23 @@ describe("CCChanSettings", () => {
     ]);
   });
 
+  it("does not add a duplicate custom pet source directory", async () => {
+    vi.mocked(open).mockResolvedValue(" /mnt/d/shared-pets ");
+    const settings = {
+      ...DEFAULT_CCCHAN_SETTINGS,
+      customPetDirs: ["/mnt/d/shared-pets"],
+    };
+    const { onChange } = renderSettings(settings);
+    await waitForInitialLoad();
+
+    await userEvent.click(screen.getByRole("button", { name: "添加目录" }));
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("该宠物目录已存在");
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("installs a custom source pet into the user pet directory", async () => {
     useCCChanStore.setState({
       settings: DEFAULT_CCCHAN_SETTINGS,
