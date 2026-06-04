@@ -1,3 +1,4 @@
+pub mod ccchan_tray;
 pub mod claude_session_service;
 pub mod codex_session_service;
 pub mod default_skill_service;

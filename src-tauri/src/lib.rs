@@ -11,6 +11,7 @@ pub mod repository;
 pub mod services;
 pub mod utils;
 
+use cc_panes_core::services::ccchan_tray::run_ccchan_tray_toggle;
 use ccchan_commands::{
     cancel_ccchan_pet_preview, delete_ccchan_user_pet, get_ccchan_custom_pet_dir_statuses,
     get_ccchan_pets, get_ccchan_settings, hide_ccchan, install_ccchan_pet_from_path,
@@ -382,20 +383,6 @@ fn should_close_main_window_to_tray(window: &tauri::Window) -> bool {
         .try_state::<Arc<SettingsService>>()
         .map(|settings| settings.get_settings().general.close_to_tray)
         .unwrap_or(false)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CCChanTrayAction {
-    Show,
-    Hide,
-}
-
-fn next_ccchan_tray_action(window_visible: bool) -> CCChanTrayAction {
-    if window_visible {
-        CCChanTrayAction::Hide
-    } else {
-        CCChanTrayAction::Show
-    }
 }
 
 /// 触发截图流程：SetWindowDisplayAffinity 方案
@@ -1425,12 +1412,12 @@ pub fn run() {
                     }
                     "toggle_ccchan" => {
                         if let Some(ccchan_svc) = app.try_state::<Arc<CCChanService>>() {
-                            let action =
-                                next_ccchan_tray_action(ccchan_svc.settings().window_visible);
-                            let result = match action {
-                                CCChanTrayAction::Show => ccchan_svc.show_window(app),
-                                CCChanTrayAction::Hide => ccchan_svc.hide_window(app),
-                            };
+                            let window_visible = ccchan_svc.settings().window_visible;
+                            let result = run_ccchan_tray_toggle(
+                                window_visible,
+                                || ccchan_svc.show_window(app),
+                                || ccchan_svc.hide_window(app),
+                            );
                             if let Err(error) = result {
                                 warn!("[ccchan] tray toggle failed: {}", error);
                             }
@@ -1884,15 +1871,4 @@ pub fn run() {
                 workspace_cleanup.stop_watcher();
             }
         });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ccchan_tray_action_toggles_current_visibility() {
-        assert_eq!(next_ccchan_tray_action(true), CCChanTrayAction::Hide);
-        assert_eq!(next_ccchan_tray_action(false), CCChanTrayAction::Show);
-    }
 }
