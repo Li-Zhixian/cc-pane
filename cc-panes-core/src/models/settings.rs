@@ -353,26 +353,28 @@ impl CCChanSettings {
     }
 
     pub fn validate_chat_runtimes(&self) -> Result<(), String> {
-        for role in &self.roles {
-            if role.runtime_kind != "wsl" {
-                continue;
-            }
-            let label = if role.name.trim().is_empty() {
-                role.id.as_str()
-            } else {
-                role.name.as_str()
-            };
-            let remote_path = role
-                .wsl_remote_path
-                .as_deref()
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .ok_or_else(|| format!("ccchan WSL role '{label}' requires a WSL remote path"))?;
-            if !remote_path.starts_with('/') {
-                return Err(format!(
-                    "ccchan WSL role '{label}' remote path must start with /: {remote_path}"
-                ));
-            }
+        let Some(role) = self.roles.iter().find(|role| role.id == self.active_role_id) else {
+            return Ok(());
+        };
+        if role.runtime_kind != "wsl" {
+            return Ok(());
+        }
+
+        let label = if role.name.trim().is_empty() {
+            role.id.as_str()
+        } else {
+            role.name.as_str()
+        };
+        let remote_path = role
+            .wsl_remote_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| format!("ccchan WSL role '{label}' requires a WSL remote path"))?;
+        if !remote_path.starts_with('/') {
+            return Err(format!(
+                "ccchan WSL role '{label}' remote path must start with /: {remote_path}"
+            ));
         }
         Ok(())
     }
@@ -931,6 +933,7 @@ mod tests {
     #[test]
     fn ccchan_validate_chat_runtimes_rejects_missing_wsl_remote_path() {
         let mut settings = CCChanSettings {
+            active_role_id: "codex-wsl".to_string(),
             roles: vec![
                 default_ccchan_role("claude", "homie"),
                 CCChanRolePreset {
@@ -956,8 +959,35 @@ mod tests {
     }
 
     #[test]
+    fn ccchan_validate_chat_runtimes_allows_inactive_wsl_role_without_remote_path() {
+        let mut settings = CCChanSettings {
+            active_role_id: "default".to_string(),
+            roles: vec![
+                default_ccchan_role("codex", "doro.codex-pet"),
+                CCChanRolePreset {
+                    id: "claude-wsl".to_string(),
+                    name: "Claude WSL".to_string(),
+                    ai_engine: "claude".to_string(),
+                    pet_id: "homie".to_string(),
+                    system_prompt: default_ccchan_role_prompt(),
+                    runtime_kind: "wsl".to_string(),
+                    wsl_remote_path: None,
+                    wsl_distro: Some("Ubuntu-24.04".to_string()),
+                },
+            ],
+            ..CCChanSettings::default()
+        };
+        settings.merge_missing_defaults();
+
+        settings
+            .validate_chat_runtimes()
+            .expect("inactive WSL roles should not block saving the active role");
+    }
+
+    #[test]
     fn ccchan_validate_chat_runtimes_requires_linux_style_wsl_path() {
         let mut settings = CCChanSettings {
+            active_role_id: "codex-wsl".to_string(),
             roles: vec![
                 default_ccchan_role("claude", "homie"),
                 CCChanRolePreset {

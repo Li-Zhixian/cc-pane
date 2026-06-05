@@ -166,6 +166,36 @@ describe("useCCChanStore", () => {
     expect(getCCChanRuntimeValidationError(linuxPath)).toBeNull();
   });
 
+  it("does not block saving when only an inactive WSL role is missing a remote path", () => {
+    const activeCodexWsl: CCChanRolePreset = {
+      id: "codex-wsl",
+      name: "Codex WSL",
+      aiEngine: "codex",
+      petId: "doro.codex-pet",
+      systemPrompt: "Use Codex in WSL.",
+      runtimeKind: "wsl",
+      wslRemotePath: "/mnt/d/my-project/cc-pane",
+      wslDistro: "Ubuntu-24.04",
+    };
+    const inactiveClaudeWsl: CCChanRolePreset = {
+      id: "claude-wsl",
+      name: "Claude WSL",
+      aiEngine: "claude",
+      petId: "homie",
+      systemPrompt: "Use Claude in WSL.",
+      runtimeKind: "wsl",
+      wslRemotePath: null,
+      wslDistro: "Ubuntu-24.04",
+    };
+    const settings = normalizeCCChanSettings({
+      ...DEFAULT_CCCHAN_SETTINGS,
+      activeRoleId: activeCodexWsl.id,
+      roles: [activeCodexWsl, inactiveClaudeWsl],
+    });
+
+    expect(getCCChanRuntimeValidationError(settings)).toBeNull();
+  });
+
   it("loads settings and pets through Tauri commands", async () => {
     vi.mocked(invoke).mockImplementation((cmd) => {
       if (cmd === "get_ccchan_settings") {
